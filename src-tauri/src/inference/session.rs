@@ -104,8 +104,12 @@ pub fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Session> {
     let builder = builder
         .with_optimization_level(GraphOptimizationLevel::Level3)
         .map_err(|e| anyhow::anyhow!("{}", e))?;
+    let intra_threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .clamp(1, 4);
     let builder = builder
-        .with_intra_threads(4)
+        .with_intra_threads(intra_threads)
         .map_err(|e| anyhow::anyhow!("{}", e))?;
 
     // Execution Providers ordered by priority - falls back to CPU
@@ -122,6 +126,8 @@ pub fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Session> {
             ort::ep::CoreML::default().build(),
             #[cfg(feature = "nnapi")]
             ort::ep::NNAPI::default().build(),
+            #[cfg(feature = "xnnpack")]
+            ort::ep::XNNPACK::default().build(),
         ])
         .map_err(|e| anyhow::anyhow!("{}", e))?;
 

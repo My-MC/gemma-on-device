@@ -1,3 +1,4 @@
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
@@ -21,8 +22,8 @@ pub struct BenchResult {
 pub async fn run_bench(state: &AppState, iterations: usize) -> anyhow::Result<BenchResult> {
     let prompt = "こんにちは、Gemmaの推論速度を計測しています。";
     let mut latencies = Vec::new();
-    let mut tps = Vec::new();
     let mut total_tokens = 0;
+    let mut total_latency_ms: f64 = 0.0;
     let mut is_mock = false;
 
     for _ in 0..iterations {
@@ -37,14 +38,23 @@ pub async fn run_bench(state: &AppState, iterations: usize) -> anyhow::Result<Be
             },
         )
         .await?;
-        latencies.push(start.elapsed().as_millis() as f64);
-        tps.push(res.tokens_per_sec);
+        let elapsed = start.elapsed().as_millis() as f64;
+        latencies.push(elapsed);
+        total_latency_ms += elapsed;
         total_tokens += res.generated_tokens;
         is_mock = res.is_mock;
     }
 
-    let avg_latency = latencies.iter().sum::<f64>() / latencies.len() as f64;
-    let avg_tps = tps.iter().sum::<f64>() / tps.len() as f64;
+    let avg_latency = if latencies.is_empty() {
+        0.0
+    } else {
+        latencies.iter().sum::<f64>() / latencies.len() as f64
+    };
+    let avg_tps = if total_latency_ms > 0.0 {
+        total_tokens as f64 / (total_latency_ms / 1000.0)
+    } else {
+        0.0
+    };
 
     Ok(BenchResult {
         model_id: if is_mock {
@@ -60,6 +70,6 @@ pub async fn run_bench(state: &AppState, iterations: usize) -> anyhow::Result<Be
         avg_tokens_per_sec: avg_tps,
         total_tokens,
         is_mock,
-        timestamp: format!("{:?}", std::time::SystemTime::now()),
+        timestamp: Utc::now().to_rfc3339(),
     })
 }

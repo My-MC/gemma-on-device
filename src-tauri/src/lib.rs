@@ -77,13 +77,17 @@ async fn generate_stream(
     };
 
     let result = inference::generate::generate_stream(&state, opts, |token| {
-        let _ = app.emit("token", token);
+        if let Err(e) = app.emit("token", token) {
+            eprintln!("[emit] token failed: {e}");
+        }
         Ok(())
     })
     .await
     .map_err(|e| e.to_string())?;
 
-    let _ = app.emit("generation-complete", &result);
+    if let Err(e) = app.emit("generation-complete", &result) {
+        eprintln!("[emit] generation-complete failed: {e}");
+    }
     Ok(result)
 }
 
@@ -142,21 +146,15 @@ pub fn run() {
 
 /// Resolve model dir considering mobile sandbox (app_data_dir) vs desktop dev (project models/)
 fn resolve_model_dir_for_app(app: &tauri::AppHandle) -> std::path::PathBuf {
-    // 1) Try app_data_dir (mobile + desktop installed)
     if let Ok(app_data) = app.path().app_data_dir() {
         let candidate = app_data.join("models");
-        // On desktop dev, if project `models/` exists, prefer it for easier CLI access (`bun run download:model`)
-        // On mobile, project `models` never exists, so app_data will be used.
         let project_models = resolve_model_dir();
         let use_project = project_models.exists() && cfg!(debug_assertions) && !is_mobile(app);
         if use_project {
-            // Ensure app_data candidate also exists for future migration
-            let _ = std::fs::create_dir_all(&candidate);
             return project_models;
         }
         return candidate;
     }
-    // Fallback to old resolver
     resolve_model_dir()
 }
 

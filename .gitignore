@@ -6,6 +6,7 @@ dist-ssr
 *.local
 .env
 models/
+!models/README.md
 *.onnx
 *.onnx_data
 bun.lockb

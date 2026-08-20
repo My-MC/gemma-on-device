@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
@@ -83,6 +83,10 @@ export default function App() {
   const [downloadProgress, setDownloadProgress] = useState<Record<string, DownloadProgress>>({});
   const [downloadComplete, setDownloadComplete] = useState<string[] | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const streamTokensRef = useRef<string[]>([]);
+  useEffect(() => {
+    streamTokensRef.current = streamTokens;
+  }, [streamTokens]);
 
   useEffect(() => {
     // Load system + model status
@@ -90,40 +94,46 @@ export default function App() {
     invoke<ModelInfo[]>("check_model_status").then(setModels).catch(() => {});
     invoke<string>("greet", { name: "Gemma" }).catch(() => {});
 
-    // Listen for streaming tokens
-    let unlistenToken: (() => void) | null = null;
-    let unlistenComplete: (() => void) | null = null;
-    let unlistenDlProgress: (() => void) | null = null;
-    let unlistenDlComplete: (() => void) | null = null;
+    const unlistenFns: (() => void)[] = [];
+    let cancelled = false;
 
-    listen<string>("token", (e) => {
-      setStreamTokens((prev) => [...prev, e.payload]);
-    }).then((f) => (unlistenToken = f));
-    listen<GenerateResult>("generation-complete", (e) => {
-      setResult(e.payload);
-      setIsGenerating(false);
-      setIsStreaming(false);
-    }).then((f) => (unlistenComplete = f));
+    const setup = async () => {
+      const u1 = await listen<string>("token", (e) => {
+        setStreamTokens((prev) => [...prev, e.payload]);
+      });
+      if (!cancelled) unlistenFns.push(u1);
+      else u1();
 
-    listen<DownloadProgress>("download-progress", (e) => {
-      setDownloadProgress((prev) => ({ ...prev, [e.payload.file]: e.payload }));
-      if (e.payload.error) {
-        setDownloadError(e.payload.error);
-      }
-    }).then((f) => (unlistenDlProgress = f));
+      const u2 = await listen<GenerateResult>("generation-complete", (e) => {
+        setResult(e.payload);
+        setIsGenerating(false);
+        setIsStreaming(false);
+      });
+      if (!cancelled) unlistenFns.push(u2);
+      else u2();
 
-    listen<string[]>("download-complete", (e) => {
-      setDownloadComplete(e.payload);
-      setDownloading(false);
-      // refresh model status
-      invoke<ModelInfo[]>("get_model_info").then(setModels).catch(() => {});
-    }).then((f) => (unlistenDlComplete = f));
+      const u3 = await listen<DownloadProgress>("download-progress", (e) => {
+        setDownloadProgress((prev) => ({ ...prev, [e.payload.file]: e.payload }));
+        if (e.payload.error) {
+          setDownloadError(e.payload.error);
+        }
+      });
+      if (!cancelled) unlistenFns.push(u3);
+      else u3();
+
+      const u4 = await listen<string[]>("download-complete", (e) => {
+        setDownloadComplete(e.payload);
+        setDownloading(false);
+        invoke<ModelInfo[]>("get_model_info").then(setModels).catch(() => {});
+      });
+      if (!cancelled) unlistenFns.push(u4);
+      else u4();
+    };
+    setup();
 
     return () => {
-      if (unlistenToken) unlistenToken();
-      if (unlistenComplete) unlistenComplete();
-      if (unlistenDlProgress) unlistenDlProgress();
-      if (unlistenDlComplete) unlistenDlComplete();
+      cancelled = true;
+      unlistenFns.forEach((fn) => fn());
     };
   }, []);
 
@@ -143,10 +153,8 @@ export default function App() {
 
     try {
       if (stream) {
-        // Rust will emit token events + generation-complete
         const res = await invoke<GenerateResult>("generate_stream", payload);
-        // In case events didn't fire (mock fallback), set result directly
-        if (res && !streamTokens.length) {
+        if (res && !streamTokensRef.current.length) {
           setResult(res);
           setIsGenerating(false);
           setIsStreaming(false);
@@ -394,7 +402,7 @@ export default function App() {
           {isStreaming && streamTokens.length > 0 && (
             <div className="stream-box">
               <div className="stream-label">streaming… {streamTokens.length} tokens</div>
-              <div className="stream-text">{streamTokens.join(" ")}</div>
+              <div className="stream-text">{streamTokens.join("")}</div>
             </div>
           )}
 
