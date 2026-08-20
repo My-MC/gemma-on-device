@@ -60,7 +60,35 @@ async fn generate(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+/// Streams generated text tokens and completes with the full generation result.
+///
+/// Each token is emitted through the `token` event, and the completed result is
+/// emitted through the `generation-complete` event.
+///
+/// # Arguments
+///
+/// * `prompt` - The text used to prompt generation.
+/// * `max_tokens` - Optional maximum number of tokens to generate.
+/// * `temperature` - Optional sampling temperature.
+/// * `use_chat_template` - Whether to apply the model's chat template.
+///
+/// # Returns
+///
+/// The completed generation result, or an error message if generation fails.
+///
+/// # Examples
+///
+/// ```ignore
+/// let result = generate_stream(
+///     app,
+///     "Write a greeting.".to_owned(),
+///     Some(32),
+///     Some(0.7),
+///     Some(false),
+///     state,
+/// ).await?;
+/// println!("{}", result.text);
+/// ```
 async fn generate_stream(
     app: tauri::AppHandle,
     prompt: String,
@@ -144,7 +172,21 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-/// Resolve model dir considering mobile sandbox (app_data_dir) vs desktop dev (project models/)
+/// Resolves the model directory for the application.
+///
+/// Desktop debug builds use the project `models/` directory when it exists.
+/// Other builds use the application data directory, falling back to the
+/// general model-directory resolver when the application data directory is
+/// unavailable.
+///
+/// # Examples
+///
+/// ```no_run
+/// # fn example(app: &tauri::AppHandle) {
+/// let model_dir = resolve_model_dir_for_app(app);
+/// println!("Models are stored in {}", model_dir.display());
+/// # }
+/// ```
 fn resolve_model_dir_for_app(app: &tauri::AppHandle) -> std::path::PathBuf {
     if let Ok(app_data) = app.path().app_data_dir() {
         let candidate = app_data.join("models");

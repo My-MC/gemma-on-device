@@ -96,7 +96,26 @@ impl AppState {
     }
 }
 
-/// Create an ort session with platform-appropriate execution providers
+/// Creates an ONNX Runtime session for a model file using the enabled execution providers.
+///
+/// # Examples
+///
+/// ```no_run
+/// # fn main() -> anyhow::Result<()> {
+/// let session = create_session("models/model.onnx")?;
+/// # let _ = session;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// The model path must identify a valid ONNX model file. Execution providers are
+/// selected according to the enabled Cargo features, with CPU execution used as
+/// the fallback.
+///
+/// # Errors
+///
+/// Returns an error if ONNX Runtime initialization, session configuration, or
+/// model loading fails.
 pub fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Session> {
     let _ = ort::init().commit();
 

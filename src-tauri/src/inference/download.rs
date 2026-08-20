@@ -25,6 +25,22 @@ struct FileSpec {
     expected_sha256: Option<&'static str>,
 }
 
+/// Resolves a model variant to its required files and Hugging Face repository.
+///
+/// The `default` variant selects the same files and repository as `1b-int4`.
+///
+/// # Errors
+///
+/// Returns an error if `variant` is not supported.
+///
+/// # Examples
+///
+/// ```
+/// let (files, repository) = variant_specs("1b-int8")?;
+/// assert_eq!(files.len(), 3);
+/// assert_eq!(repository, "onnx-community/gemma-3-1b-it-ONNX");
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 fn variant_specs(variant: &str) -> Result<(Vec<FileSpec>, &'static str)> {
     match variant {
         "1b-int4" | "default" => Ok((
@@ -86,14 +102,51 @@ fn variant_specs(variant: &str) -> Result<(Vec<FileSpec>, &'static str)> {
     }
 }
 
+/// Constructs a Hugging Face URL for a file in a repository's `main` revision.
+///
+/// # Examples
+///
+/// ```
+/// let url = hf_url("org/model", "config.json");
+/// assert_eq!(
+///     url,
+///     "https://huggingface.co/org/model/resolve/main/config.json"
+/// );
+/// ```
 fn hf_url(repo: &str, path: &str) -> String {
     format!("https://huggingface.co/{}/resolve/main/{}", repo, path)
 }
 
+/// Creates the temporary path used for a partial download.
+///
+/// # Examples
+///
+/// ```
+/// use std::path::Path;
+///
+/// let path = part_path(Path::new("models/model.onnx"));
+/// assert_eq!(path, Path::new("models/model.onnx.part"));
+/// ```
 fn part_path(dest: &Path) -> PathBuf {
     PathBuf::from(format!("{}.part", dest.display()))
 }
 
+/// Computes the SHA-256 digest of a file as a lowercase hexadecimal string.
+///
+/// # Examples
+///
+/// ```
+/// # use std::path::Path;
+/// # async fn example() -> anyhow::Result<()> {
+/// let digest = compute_sha256(Path::new("model.onnx")).await?;
+/// println!("{digest}");
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Returns
+///
+/// The file's SHA-256 digest encoded as a lowercase hexadecimal string.
 async fn compute_sha256(path: &Path) -> Result<String> {
     let mut file = tokio::fs::File::open(path)
         .await
@@ -110,6 +163,34 @@ async fn compute_sha256(path: &Path) -> Result<String> {
     Ok(hex::encode(hasher.finalize()))
 }
 
+/// Verifies that a file matches an expected SHA-256 digest.
+///
+/// # Arguments
+///
+/// * `path` - Path to the file to verify.
+/// * `expected` - Expected SHA-256 digest in hexadecimal form.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read or its digest differs from `expected`.
+///
+/// # Examples
+///
+/// ```
+/// # #[tokio::main]
+/// # async fn main() -> anyhow::Result<()> {
+/// # use std::{fs, path::Path};
+/// # let path = std::env::temp_dir().join("verify_sha256_example");
+/// # fs::write(&path, [])?;
+/// verify_sha256(
+///     Path::new(&path),
+///     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+/// ).await?;
+/// # fs::remove_file(path)?;
+/// # Ok(())
+/// # }
+/// ```
+async fn verify_sha256(path: &Path, expected: &str) -> Result<()>
 async fn verify_sha256(path: &Path, expected: &str) -> Result<()> {
     let actual = compute_sha256(path).await?;
     if !actual.eq_ignore_ascii_case(expected) {
@@ -123,6 +204,21 @@ async fn verify_sha256(path: &Path, expected: &str) -> Result<()> {
     Ok(())
 }
 
+/// Retrieves a non-empty Hugging Face access token from the environment.
+///
+/// The `HF_TOKEN` variable takes precedence over `HUGGING_FACE_HUB_TOKEN`.
+///
+/// # Examples
+///
+/// ```
+/// let token = hf_token();
+/// assert!(token.is_none_or(|value| !value.trim().is_empty()));
+/// ```
+///
+/// # Returns
+///
+/// The configured non-empty token, or `None` when neither environment variable
+/// contains a usable value.
 fn hf_token() -> Option<String> {
     std::env::var("HF_TOKEN")
         .or_else(|_| std::env::var("HUGGING_FACE_HUB_TOKEN"))
@@ -130,6 +226,30 @@ fn hf_token() -> Option<String> {
         .filter(|s| !s.trim().is_empty())
 }
 
+/// Downloads a file to the destination and reports its progress.
+///
+/// Existing files are reused when valid. Downloads are verified against the
+/// expected SHA-256 digest when one is provided and retried for recoverable
+/// failures.
+///
+/// # Examples
+///
+/// ```no_run
+/// # async fn example(app: &AppHandle) -> anyhow::Result<()> {
+/// download_one(
+///     app,
+///     "https://example.com/model.onnx".to_owned(),
+///     std::path::PathBuf::from("models/model.onnx"),
+///     "model.onnx".to_owned(),
+///     None,
+/// )
+/// .await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// `expected_sha256` specifies the expected SHA-256 digest when verification
+/// is required.
 async fn download_one(
     app: &AppHandle,
     url: String,
@@ -307,8 +427,19 @@ async fn download_one(
     Err(last_err.unwrap_or_else(|| anyhow::anyhow!("download failed for {file_label}")))
 }
 
-/// Download Gemma ONNX + tokenizer for the selected variant.
-/// Emits `download-progress` events and `download-complete` at end.
+/// Downloads the files required for the selected Gemma ONNX model variant.
+///
+/// Emits progress events for each file and a completion event after all required
+/// files have been processed. Missing `.onnx_data` files are tolerated for
+/// `3n` variants; other download failures abort the operation.
+///
+/// # Examples
+///
+/// ```ignore
+/// let files = download_model(app, model_dir, "1b-int4".to_owned()).await?;
+/// assert!(!files.is_empty());
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 pub async fn download_model(
     app: AppHandle,
     model_dir: PathBuf,
@@ -386,8 +517,24 @@ pub async fn download_model(
     Ok(downloaded)
 }
 
-/// Check if model is ready for the variant
-#[allow(dead_code)]
+/// Determines whether all required files for a model variant are present.
+///
+/// # Examples
+///
+/// ```
+/// use std::path::Path;
+///
+/// assert!(!is_variant_ready(Path::new("/missing/model"), "default"));
+/// ```
+///
+/// # Arguments
+///
+/// * `model_dir` - Directory containing the model files.
+/// * `variant` - Model variant whose required files are checked.
+///
+/// # Returns
+///
+/// `true` if every required file for the supported variant exists; `false` for an unknown variant or when a required file is missing.
 pub fn is_variant_ready(model_dir: &Path, variant: &str) -> bool {
     let (specs, _) = match variant_specs(variant) {
         Ok(v) => v,

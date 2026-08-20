@@ -63,6 +63,9 @@ function formatBytes(b?: number) {
   return `${(b / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
+/**
+ * Renders the Gemma on-device inference testing interface.
+ */
 export default function App() {
   const [prompt, setPrompt] = useState("こんにちは！Gemmaのオンデバイス推論について教えて。");
   const [maxTokens, setMaxTokens] = useState(128);

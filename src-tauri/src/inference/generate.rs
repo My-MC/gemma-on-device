@@ -30,7 +30,31 @@ pub struct GenerateResult {
     pub error: Option<String>,
 }
 
-/// Core generation - if model not present, returns mock response for pipeline validation
+/// Generates text using the configured model, falling back to a mock response when the model or tokenizer is unavailable or inference fails.
+///
+/// # Arguments
+///
+/// * `opts` - Generation settings, including the prompt, token limit, temperature, and chat-template preference.
+///
+/// # Returns
+///
+/// The generated text and associated metrics. Fallback results include the inference error when applicable.
+///
+/// # Examples
+///
+/// ```no_run
+/// let result = generate_text(
+///     state,
+///     GenerateOptions {
+///         prompt: "Explain machine learning.".to_owned(),
+///         max_tokens: Some(64),
+///         temperature: Some(0.7),
+///         use_chat_template: Some(true),
+///     },
+/// ).await?;
+/// println!("{}", result.text);
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 pub async fn generate_text(state: &AppState, opts: GenerateOptions) -> Result<GenerateResult> {
     let max_tokens = opts.max_tokens.unwrap_or(128).min(512);
     let temperature = opts.temperature.unwrap_or(0.7);
@@ -59,6 +83,17 @@ pub async fn generate_text(state: &AppState, opts: GenerateOptions) -> Result<Ge
     }
 }
 
+/// Creates a simulated generation result for environments without a loaded model.
+///
+/// # Examples
+///
+/// ```
+/// let result = mock_generate("Hello", 32);
+/// assert!(result.is_mock);
+/// assert_eq!(result.generated_tokens, 32);
+/// ```
+///
+/// Returns a fixed mock response with estimated prompt tokens and generation metrics.
 fn mock_generate(prompt: &str, max_tokens: usize) -> GenerateResult {
     let start = Instant::now();
     std::thread::sleep(Duration::from_millis(30));
@@ -85,7 +120,32 @@ fn mock_generate(prompt: &str, max_tokens: usize) -> GenerateResult {
     }
 }
 
-/// Streaming generation - emits tokens via tauri event
+/// Streams generated text chunks through the supplied callback.
+///
+/// Uses the configured model when available and falls back to mock generation when
+/// model files are unavailable or inference fails. Generation options control the
+/// prompt, token limit, temperature, and chat-template usage.
+///
+/// # Examples
+///
+/// ```no_run
+/// # async fn example(state: &AppState) -> Result<()> {
+/// let result = generate_stream(
+///     state,
+///     GenerateOptions {
+///         prompt: "Explain Rust ownership.".into(),
+///         max_tokens: Some(32),
+///         temperature: Some(0.7),
+///         use_chat_template: Some(true),
+///     },
+///     |chunk| {
+///         print!("{chunk}");
+///         Ok(())
+///     },
+/// ).await?;
+/// # Ok(())
+/// # }
+/// ```
 pub async fn generate_stream(
     state: &AppState,
     opts: GenerateOptions,
@@ -127,6 +187,17 @@ pub async fn generate_stream(
     }
 }
 
+/// Generates text with the configured tokenizer and ONNX model, optionally emitting each generated token.
+///
+/// # Examples
+///
+/// ```no_run
+/// # async fn example(state: &AppState) -> anyhow::Result<()> {
+/// let result = inner_generate(state, "Explain quantum computing.", 32, 0.7, None).await?;
+/// assert!(!result.is_mock);
+/// # Ok(())
+/// # }
+/// ```
 async fn inner_generate(
     state: &AppState,
     prompt_templated: &str,
@@ -286,6 +357,21 @@ async fn inner_generate(
     })
 }
 
+/// Extracts the vocabulary size and sequence length from a logits shape.
+///
+/// Two-dimensional shapes are interpreted as vocabulary-by-one-sequence, while
+/// three-dimensional shapes are interpreted as batch-by-sequence-by-vocabulary.
+///
+/// # Errors
+///
+/// Returns an error when the shape has a dimensionality other than two or three.
+///
+/// # Examples
+///
+/// ```
+/// assert_eq!(parse_logits_shape(&[1, 8]).unwrap(), (8, 1));
+/// assert_eq!(parse_logits_shape(&[1, 4, 32000]).unwrap(), (32000, 4));
+/// ```
 fn parse_logits_shape(shape: &[i64]) -> Result<(usize, usize)> {
     match shape.len() {
         2 => {
@@ -301,6 +387,19 @@ fn parse_logits_shape(shape: &[i64]) -> Result<(usize, usize)> {
     }
 }
 
+/// Selects a token index from logits using temperature-scaled sampling.
+///
+/// Nonpositive, non-finite, or near-zero temperatures use the index of the
+/// largest logit. Invalid sampling probabilities also fall back to the
+/// largest logit.
+///
+/// # Examples
+///
+/// ```
+/// let index = sample_token(&[0.1, 0.8, 0.3], 0.0);
+/// assert_eq!(index, 1);
+/// ```
+fn sample_token
 fn sample_token(logits: &[f32], temperature: f32) -> usize {
     if logits.is_empty() {
         return 0;
@@ -334,6 +433,14 @@ fn sample_token(logits: &[f32], temperature: f32) -> usize {
     exps.len() - 1
 }
 
+/// Finds the index of the largest value in a slice, returning `0` for an empty slice.
+///
+/// # Examples
+///
+/// ```
+/// assert_eq!(argmax(&[1.0, 3.0, 2.0]), 1);
+/// assert_eq!(argmax(&[]), 0);
+/// ```
 fn argmax(slice: &[f32]) -> usize {
     if slice.is_empty() {
         return 0;

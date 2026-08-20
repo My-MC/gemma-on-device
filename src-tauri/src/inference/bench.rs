@@ -19,6 +19,25 @@ pub struct BenchResult {
     pub timestamp: String,
 }
 
+/// Benchmarks text generation for the specified number of iterations.
+///
+/// # Arguments
+///
+/// * `iterations` - The number of generation requests to measure.
+///
+/// # Returns
+///
+/// A benchmark result containing aggregate latency, token throughput, model metadata, and timestamp.
+///
+/// # Examples
+///
+/// ```no_run
+/// # async fn example(state: &AppState) -> anyhow::Result<()> {
+/// let result = run_bench(state, 1).await?;
+/// assert_eq!(result.iterations, 1);
+/// # Ok(())
+/// # }
+/// ```
 pub async fn run_bench(state: &AppState, iterations: usize) -> anyhow::Result<BenchResult> {
     let prompt = "こんにちは、Gemmaの推論速度を計測しています。";
     let mut total_tokens = 0;
