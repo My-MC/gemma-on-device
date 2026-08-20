@@ -45,6 +45,15 @@ cargo build --manifest-path src-tauri/Cargo.toml
 - `bunx tauri` is equivalent to `bun run tauri`, but this project standardizes on `bun run tauri`
 - On WSL, force software rendering: `GDK_BACKEND=x11 WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 LIBGL_ALWAYS_SOFTWARE=1 bun run tauri dev`
 
+## Development Workflow (GitHub Flow, Mandatory)
+
+- **Branching**: Never commit directly to `main`. Create a feature branch per task from `main` (`feat/<scope>`, `fix/<scope>`, `chore/<scope>`, `docs/<scope>`).
+- **Commits**: Keep commits atomic and reviewable. Each commit that touches `src-tauri/` must have passed `cargo check`, `cargo clippy -- -D warnings`, `cargo fmt -- --check` locally.
+- **PRs**: Open a PR via `gh pr create` for every branch. Title uses conventional prefix (`feat:`, `fix:`, `chore:`, `docs:`). Fill in summary, verification, and risk. CI must be green before merge.
+- **Merging**: Do NOT merge directly to `main` locally (`git merge main` is for updating feature branch only). Merge only via GitHub PR (Squash or Merge). Do NOT use `git push origin main` from a feature branch.
+- **Docs**: Update `AGENTS.md` / `CONTRIBUTING.md` / `README.md` when workflow, quality gates, or model handling changes.
+- See `CONTRIBUTING.md` for full contributor workflow including SHA256 model verification.
+
 ## Coding Conventions
 
 - **Comments**: Keep concise. Do not write long-form thinking in code comments.
@@ -59,7 +68,8 @@ cargo build --manifest-path src-tauri/Cargo.toml
 
 - `src-tauri/src/lib.rs:run()` resolves `app.path().app_data_dir().join("models")` in `setup`. If `models/` exists in the project (desktop dev), it is preferred; otherwise `app_data` is used (Mobile/installed).
 - `src-tauri/capabilities/default.json` is `core:default` + `opener:default` and allows custom commands (`generate`, `download_model`, etc.).
-- `src-tauri/src/inference/download.rs` streams via `reqwest` (`rustls-tls`) and emits `app.emit("download-progress")` / `emit("download-complete")`, listened to in `src/App.tsx`.
+- `src-tauri/src/inference/download.rs` streams via `reqwest` (`rustls-tls`) and emits `app.emit("download-progress")` / `emit("download-complete")`, listened to in `src/App.tsx`. Downloads are verified via SHA256 (`models/README.md`, see `CONTRIBUTING.md`).
+- **SHA256**: Every model file (`*.onnx`, `*.onnx_data`, `tokenizer.json`) must be SHA256-verified after download. Expected hashes live in `models/README.md`. Verification is mandatory before `Session::commit_from_file`.
 
 ## Context7 / Context-Mode (Mandatory)
 
@@ -102,7 +112,8 @@ bun run build  # also covers tsc
 ## Documentation
 
 - `README.md` — canonical source for startup/development/tech stack
-- `models/README.md` — model details
+- `models/README.md` — model details (variants, SHA256, download)
+- `CONTRIBUTING.md` — contributor workflow (GitHub Flow, quality gates, SHA256)
 - `AGENTS.md` (this file) — agent operational rules
 
 ## Prohibited
