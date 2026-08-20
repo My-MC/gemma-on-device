@@ -21,7 +21,6 @@ pub struct BenchResult {
 
 pub async fn run_bench(state: &AppState, iterations: usize) -> anyhow::Result<BenchResult> {
     let prompt = "こんにちは、Gemmaの推論速度を計測しています。";
-    let mut latencies = Vec::new();
     let mut total_tokens = 0;
     let mut total_latency_ms: f64 = 0.0;
     let mut is_mock = false;
@@ -39,16 +38,15 @@ pub async fn run_bench(state: &AppState, iterations: usize) -> anyhow::Result<Be
         )
         .await?;
         let elapsed = start.elapsed().as_millis() as f64;
-        latencies.push(elapsed);
         total_latency_ms += elapsed;
         total_tokens += res.generated_tokens;
         is_mock = res.is_mock;
     }
 
-    let avg_latency = if latencies.is_empty() {
+    let avg_latency = if iterations == 0 {
         0.0
     } else {
-        latencies.iter().sum::<f64>() / latencies.len() as f64
+        total_latency_ms / iterations as f64
     };
     let avg_tps = if total_latency_ms > 0.0 {
         total_tokens as f64 / (total_latency_ms / 1000.0)

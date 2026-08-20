@@ -5,10 +5,11 @@ dist
 dist-ssr
 *.local
 .env
-models/
+models/*
 !models/README.md
 *.onnx
 *.onnx_data
+!models/.gitkeep
 bun.lockb
 .DS_Store
 *.deb

@@ -34,5 +34,6 @@ export default defineConfig(async () => ({
   },
   preview: {
     port: 1420,
+    strictPort: true,
   },
 }));

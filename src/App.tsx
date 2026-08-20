@@ -22,6 +22,7 @@ type GenerateResult = {
   tokens_per_sec: number;
   is_mock: boolean;
   model_id: string;
+  error?: string;
 };
 
 type BenchResult = {
@@ -84,9 +85,6 @@ export default function App() {
   const [downloadComplete, setDownloadComplete] = useState<string[] | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const streamTokensRef = useRef<string[]>([]);
-  useEffect(() => {
-    streamTokensRef.current = streamTokens;
-  }, [streamTokens]);
 
   useEffect(() => {
     // Load system + model status
@@ -99,7 +97,11 @@ export default function App() {
 
     const setup = async () => {
       const u1 = await listen<string>("token", (e) => {
-        setStreamTokens((prev) => [...prev, e.payload]);
+        setStreamTokens((prev) => {
+          const next = [...prev, e.payload];
+          streamTokensRef.current = next;
+          return next;
+        });
       });
       if (!cancelled) unlistenFns.push(u1);
       else u1();
@@ -141,6 +143,7 @@ export default function App() {
     setError(null);
     setResult(null);
     setStreamTokens([]);
+    streamTokensRef.current = [];
     setIsGenerating(true);
     setIsStreaming(stream);
 
@@ -416,6 +419,7 @@ export default function App() {
                 </span>
               </div>
               <pre className="result-text">{result.text}</pre>
+              {result.error && <div className="error" style={{ marginTop: 8 }}>{result.error}</div>}
               <div className="result-meta">
                 <span className={`pill ${result.is_mock ? "warn" : "ok"}`}>{result.is_mock ? "mock pipeline" : "real inference"}</span>
                 {result.is_mock && <span className="muted">モデル配置で実推論に切替</span>}

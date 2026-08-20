@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DownloadProgress {
@@ -95,11 +95,18 @@ fn part_path(dest: &Path) -> PathBuf {
 }
 
 async fn compute_sha256(path: &Path) -> Result<String> {
-    let data = tokio::fs::read(path)
+    let mut file = tokio::fs::File::open(path)
         .await
-        .with_context(|| format!("read for sha256 {:?}", path))?;
+        .with_context(|| format!("open for sha256 {:?}", path))?;
     let mut hasher = Sha256::new();
-    hasher.update(&data);
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = file.read(&mut buf).await.context("read chunk for sha256")?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
     Ok(hex::encode(hasher.finalize()))
 }
 
@@ -138,7 +145,7 @@ async fn download_one(
 
     let part = part_path(&dest);
 
-    // If final dest already exists, verify (if hash known) and skip
+    // If final dest already exists, verify and skip if valid
     if dest.exists() {
         if let Some(expected) = expected_sha256 {
             match verify_sha256(&dest, expected).await {
@@ -167,20 +174,28 @@ async fn download_one(
                 }
             }
         } else {
-            let meta = tokio::fs::metadata(&dest).await.ok();
-            let total = meta.map(|m| m.len());
-            let _ = app.emit(
-                "download-progress",
-                DownloadProgress {
-                    file: file_label.clone(),
-                    downloaded: total.unwrap_or(0),
-                    total,
-                    percent: Some(100.0),
-                    done: true,
-                    error: None,
-                },
-            );
-            return Ok(());
+            // No hash: validate via file size (non-empty) to detect truncated downloads
+            if let Ok(meta) = tokio::fs::metadata(&dest).await {
+                let len = meta.len();
+                if len == 0 {
+                    eprintln!("[download] existing {:?} is empty — re-downloading", dest);
+                    let _ = tokio::fs::remove_file(&dest).await;
+                } else {
+                    let total = Some(len);
+                    let _ = app.emit(
+                        "download-progress",
+                        DownloadProgress {
+                            file: file_label.clone(),
+                            downloaded: len,
+                            total,
+                            percent: Some(100.0),
+                            done: true,
+                            error: None,
+                        },
+                    );
+                    return Ok(());
+                }
+            }
         }
     }
 
@@ -191,7 +206,7 @@ async fn download_one(
 
     let client = reqwest::Client::builder()
         .user_agent("gemma-on-device/1.0")
-        .timeout(Duration::from_secs(600))
+        .read_timeout(Duration::from_secs(60))
         .connect_timeout(Duration::from_secs(30))
         .build()
         .context("build reqwest client")?;
@@ -272,16 +287,18 @@ async fn download_one(
             Ok(_) => return Ok(()),
             Err(e) => {
                 let _ = tokio::fs::remove_file(&part).await;
-                let is_retryable = attempt < max_attempts;
+                let err_str = e.to_string();
+                let is_not_found_or_auth =
+                    err_str.contains("401") || err_str.contains("404") || err_str.contains("403");
+                let has_attempt_left = attempt < max_attempts && !is_not_found_or_auth;
                 eprintln!(
-                    "[download] attempt {}/{} for {} failed: {e:?} (retryable={})",
-                    attempt, max_attempts, file_label, is_retryable
+                    "[download] attempt {}/{} for {} failed: {e:?} (retry={})",
+                    attempt, max_attempts, file_label, has_attempt_left
                 );
-                if !is_retryable {
-                    last_err = Some(e);
+                last_err = Some(e);
+                if !has_attempt_left {
                     break;
                 }
-                last_err = Some(e);
                 tokio::time::sleep(Duration::from_millis(500 * attempt as u64)).await;
             }
         }

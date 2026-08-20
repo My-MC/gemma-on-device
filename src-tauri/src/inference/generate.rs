@@ -48,7 +48,7 @@ pub async fn generate_text(state: &AppState, opts: GenerateOptions) -> Result<Ge
         return Ok(mock_generate(&opts.prompt, max_tokens));
     }
 
-    match try_real_inference(state, &prompt, max_tokens, temperature).await {
+    match inner_generate(state, &prompt, max_tokens, temperature, None).await {
         Ok(res) => Ok(res),
         Err(e) => {
             eprintln!("[ort] real inference failed, falling back to mock: {e:?}");
@@ -71,8 +71,7 @@ fn mock_generate(prompt: &str, max_tokens: usize) -> GenerateResult {
     );
     let latency = start.elapsed().as_millis() as u64;
     let tokens = 32;
-    // Use actual char-based estimate; real token count will come from tokenizer when model exists
-    let prompt_tokens = prompt.split_whitespace().count();
+    let prompt_tokens = (prompt.chars().count() as f64 / 2.5).ceil() as usize;
     GenerateResult {
         text: generated,
         prompt_tokens,
@@ -86,18 +85,61 @@ fn mock_generate(prompt: &str, max_tokens: usize) -> GenerateResult {
     }
 }
 
-async fn try_real_inference(
+/// Streaming generation - emits tokens via tauri event
+pub async fn generate_stream(
     state: &AppState,
-    prompt: &str,
+    opts: GenerateOptions,
+    emit: impl Fn(String) -> Result<()> + Send + Sync,
+) -> Result<GenerateResult> {
+    let max_tokens = opts.max_tokens.unwrap_or(128).min(512);
+    let temperature = opts.temperature.unwrap_or(0.7);
+    let use_template = opts.use_chat_template.unwrap_or(true);
+    let prompt = if use_template {
+        apply_gemma_chat_template(&opts.prompt)
+    } else {
+        opts.prompt.clone()
+    };
+
+    let model_path = state.default_model_path();
+    let tok_path = state.default_tokenizer_path();
+
+    if !model_path.exists() || !tok_path.exists() {
+        let res = mock_generate(&opts.prompt, max_tokens);
+        for chunk in res.text.split_inclusive(' ') {
+            emit(chunk.to_string())?;
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        return Ok(res);
+    }
+
+    match inner_generate(state, &prompt, max_tokens, temperature, Some(&emit)).await {
+        Ok(res) => Ok(res),
+        Err(e) => {
+            eprintln!("[ort] real stream failed, falling back to mock: {e:?}");
+            let mut mock = mock_generate(&opts.prompt, max_tokens);
+            mock.error = Some(format!("real stream failed: {e}"));
+            for chunk in mock.text.split_inclusive(' ') {
+                let _ = emit(chunk.to_string());
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            Ok(mock)
+        }
+    }
+}
+
+async fn inner_generate(
+    state: &AppState,
+    prompt_templated: &str,
     max_tokens: usize,
     temperature: f32,
+    emit: Option<&(dyn Fn(String) -> Result<()> + Send + Sync)>,
 ) -> Result<GenerateResult> {
     let start = Instant::now();
     let tok_path = state.default_tokenizer_path();
     let model_path = state.default_model_path();
 
     let tokenizer = load_tokenizer(&tok_path)?;
-    let input_ids = tokenizer.encode(prompt, true)?;
+    let input_ids = tokenizer.encode(prompt_templated, true)?;
     let prompt_tokens = input_ids.len();
 
     let mut guard = state.session.lock().await;
@@ -116,12 +158,11 @@ async fn try_real_inference(
             },
         });
     }
-
     let session = guard
         .as_mut()
         .ok_or_else(|| anyhow::anyhow!("session missing after creation"))?;
 
-    // Determine EOS ids from tokenizer
+    // Determine EOS ids from tokenizer. Gemma 3 1B IT: <eos>=1, <end_of_turn>=106
     let eos_ids = {
         let mut ids = Vec::new();
         for tok in ["<eos>", "<end_of_turn>"] {
@@ -133,13 +174,20 @@ async fn try_real_inference(
         }
         if ids.is_empty() {
             ids.push(1);
-            ids.push(107);
+            ids.push(106);
         }
         ids
     };
 
+    let has_mask = session
+        .session
+        .inputs()
+        .iter()
+        .any(|i| i.name() == "attention_mask");
+
     let mut generated_ids: Vec<i64> = Vec::new();
     let mut current_ids = input_ids.clone();
+    let mut full_text = String::new();
 
     for _ in 0..max_tokens {
         let seq_len = current_ids.len();
@@ -148,11 +196,6 @@ async fn try_real_inference(
         let mask_tensor = Tensor::from_array(([1, seq_len], vec![1i64; seq_len]))
             .map_err(|e| anyhow::anyhow!("mask tensor error: {e}"))?;
 
-        let has_mask = session
-            .session
-            .inputs()
-            .iter()
-            .any(|i| i.name() == "attention_mask");
         let outputs = if has_mask {
             session
                 .session
@@ -165,7 +208,6 @@ async fn try_real_inference(
                 .map_err(|e| anyhow::anyhow!("ort run error: {e}"))?
         };
 
-        // Extract logits, handling f32 and f16
         let (vocab, seq, data_f32): (usize, usize, Vec<f32>) = {
             if let Ok((shape, data)) = outputs[0].try_extract_tensor::<f32>() {
                 let (v, s) = parse_logits_shape(shape)?;
@@ -196,6 +238,14 @@ async fn try_real_inference(
         generated_ids.push(next_id);
         current_ids.push(next_id);
 
+        if let Some(emit_fn) = emit {
+            let token_text = tokenizer
+                .decode(&[next_id], true)
+                .unwrap_or_else(|_| next_id.to_string());
+            full_text.push_str(&token_text);
+            emit_fn(token_text)?;
+        }
+
         if generated_ids.len() >= max_tokens {
             break;
         }
@@ -203,6 +253,17 @@ async fn try_real_inference(
 
     let text = if generated_ids.is_empty() {
         mock_detokenize(&current_ids)
+    } else if emit.is_some() {
+        if full_text.is_empty() {
+            tokenizer
+                .decode(&generated_ids, true)
+                .with_context(|| "decode generated ids")?
+        } else {
+            // Re-decode for final result to ensure correct detokenization
+            tokenizer
+                .decode(&generated_ids, true)
+                .unwrap_or_else(|_| full_text.clone())
+        }
     } else {
         tokenizer
             .decode(&generated_ids, true)
@@ -228,7 +289,6 @@ async fn try_real_inference(
 fn parse_logits_shape(shape: &[i64]) -> Result<(usize, usize)> {
     match shape.len() {
         2 => {
-            // [1, vocab] or [batch, vocab]
             let vocab = shape[1] as usize;
             Ok((vocab, 1))
         }
@@ -248,7 +308,6 @@ fn sample_token(logits: &[f32], temperature: f32) -> usize {
     if temperature <= 0.0 || !temperature.is_finite() {
         return argmax(logits);
     }
-    // If temperature is very low, treat as greedy
     if temperature < 1e-4 {
         return argmax(logits);
     }
@@ -288,197 +347,4 @@ fn argmax(slice: &[f32]) -> usize {
         }
     }
     max_idx
-}
-
-/// Streaming generation - emits tokens via tauri event
-pub async fn generate_stream(
-    state: &AppState,
-    opts: GenerateOptions,
-    emit: impl Fn(String) -> Result<()> + Send + Sync,
-) -> Result<GenerateResult> {
-    let max_tokens = opts.max_tokens.unwrap_or(128).min(512);
-    let temperature = opts.temperature.unwrap_or(0.7);
-    let use_template = opts.use_chat_template.unwrap_or(true);
-    let prompt = if use_template {
-        apply_gemma_chat_template(&opts.prompt)
-    } else {
-        opts.prompt.clone()
-    };
-
-    let model_path = state.default_model_path();
-    let tok_path = state.default_tokenizer_path();
-
-    if !model_path.exists() || !tok_path.exists() {
-        let res = mock_generate(&opts.prompt, max_tokens);
-        for tok in res.text.split_whitespace() {
-            emit(tok.to_string())?;
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        return Ok(res);
-    }
-
-    // Try real streaming
-    match try_real_stream(state, &prompt, &opts.prompt, max_tokens, temperature, &emit).await {
-        Ok(res) => Ok(res),
-        Err(e) => {
-            eprintln!("[ort] real stream failed, falling back to mock: {e:?}");
-            let mut mock = mock_generate(&opts.prompt, max_tokens);
-            mock.error = Some(format!("real stream failed: {e}"));
-            for tok in mock.text.split_whitespace() {
-                let _ = emit(tok.to_string());
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-            Ok(mock)
-        }
-    }
-}
-
-async fn try_real_stream(
-    state: &AppState,
-    prompt_templated: &str,
-    prompt_raw: &str,
-    max_tokens: usize,
-    temperature: f32,
-    emit: &(impl Fn(String) -> Result<()> + Send + Sync),
-) -> Result<GenerateResult> {
-    let start = Instant::now();
-    let tok_path = state.default_tokenizer_path();
-    let model_path = state.default_model_path();
-
-    let tokenizer = load_tokenizer(&tok_path)?;
-    let input_ids = tokenizer.encode(prompt_templated, true)?;
-    let prompt_tokens = input_ids.len();
-
-    let mut guard = state.session.lock().await;
-    if guard.is_none() {
-        let session = super::session::create_session(&model_path)?;
-        *guard = Some(super::session::InferenceSession {
-            session,
-            model_info: super::session::ModelInfo {
-                model_id: "gemma-3-1b-it-INT4".to_string(),
-                onnx_path: model_path.to_string_lossy().to_string(),
-                tokenizer_path: tok_path.to_string_lossy().to_string(),
-                exists: true,
-                size_bytes: None,
-                quantization: "INT4".to_string(),
-                description: "real".to_string(),
-            },
-        });
-    }
-    let session = guard
-        .as_mut()
-        .ok_or_else(|| anyhow::anyhow!("session missing after creation"))?;
-
-    let eos_ids = {
-        let mut ids = Vec::new();
-        for tok in ["<eos>", "<end_of_turn>"] {
-            if let Ok(enc) = tokenizer.encode(tok, false) {
-                if enc.len() == 1 {
-                    ids.push(enc[0]);
-                }
-            }
-        }
-        if ids.is_empty() {
-            ids.push(1);
-            ids.push(107);
-        }
-        ids
-    };
-
-    let mut generated_ids: Vec<i64> = Vec::new();
-    let mut current_ids = input_ids.clone();
-    let mut full_text = String::new();
-
-    for _ in 0..max_tokens {
-        let seq_len = current_ids.len();
-        let input_tensor = Tensor::from_array(([1, seq_len], current_ids.clone()))
-            .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
-        let mask_tensor = Tensor::from_array(([1, seq_len], vec![1i64; seq_len]))
-            .map_err(|e| anyhow::anyhow!("mask tensor error: {e}"))?;
-
-        let has_mask = session
-            .session
-            .inputs()
-            .iter()
-            .any(|i| i.name() == "attention_mask");
-        let outputs = if has_mask {
-            session
-                .session
-                .run(ort::inputs!["input_ids" => input_tensor, "attention_mask" => mask_tensor])
-                .map_err(|e| anyhow::anyhow!("ort run error (with mask): {e}"))?
-        } else {
-            session
-                .session
-                .run(ort::inputs!["input_ids" => input_tensor])
-                .map_err(|e| anyhow::anyhow!("ort run error: {e}"))?
-        };
-
-        let (vocab, seq, data_f32): (usize, usize, Vec<f32>) = {
-            if let Ok((shape, data)) = outputs[0].try_extract_tensor::<f32>() {
-                let (v, s) = parse_logits_shape(shape)?;
-                (v, s, data.to_vec())
-            } else if let Ok((shape, data)) = outputs[0].try_extract_tensor::<f16>() {
-                let (v, s) = parse_logits_shape(shape)?;
-                let converted: Vec<f32> = data.iter().map(|x| x.to_f32()).collect();
-                (v, s, converted)
-            } else {
-                anyhow::bail!("logits extraction failed: expected f32 or f16");
-            }
-        };
-
-        if vocab == 0 || seq == 0 {
-            anyhow::bail!("invalid logits shape vocab={vocab} seq={seq}");
-        }
-        let last_offset = (seq - 1) * vocab;
-        let last_logits = &data_f32[last_offset..last_offset + vocab];
-        let next_id = sample_token(last_logits, temperature) as i64;
-
-        if eos_ids.contains(&next_id) {
-            break;
-        }
-
-        generated_ids.push(next_id);
-        current_ids.push(next_id);
-
-        // Decode incremental token and emit
-        let token_text = tokenizer
-            .decode(&[next_id], true)
-            .unwrap_or_else(|_| next_id.to_string());
-        full_text.push_str(&token_text);
-        emit(token_text)?;
-
-        if generated_ids.len() >= max_tokens {
-            break;
-        }
-    }
-
-    // Fallback if nothing generated
-    if generated_ids.is_empty() {
-        full_text = mock_detokenize(&current_ids);
-    } else {
-        // Ensure full_text is fully decoded (in case incremental decode produced subwords with spaces)
-        // Re-decode all generated ids for final result; streaming already emitted incremental pieces
-        let decoded = tokenizer
-            .decode(&generated_ids, true)
-            .unwrap_or_else(|_| full_text.clone());
-        full_text = decoded;
-    }
-
-    // Suppress unused warning for raw prompt (used in fallback path)
-    let _ = prompt_raw;
-
-    let latency_ms = start.elapsed().as_millis() as u64;
-    let tokens_per_sec = generated_ids.len() as f64 / (latency_ms as f64 / 1000.0).max(0.001);
-
-    Ok(GenerateResult {
-        text: full_text,
-        prompt_tokens,
-        generated_tokens: generated_ids.len(),
-        total_tokens: prompt_tokens + generated_ids.len(),
-        latency_ms,
-        tokens_per_sec,
-        is_mock: false,
-        model_id: "gemma-3-1b-it-INT4".to_string(),
-        error: None,
-    })
 }
