@@ -1,0 +1,42 @@
+[package]
+name = "gemma-on-device"
+version = "0.1.0"
+description = "Gemma on-device inference with ort + Tauri (Bun + React) - multi-platform validation"
+authors = ["you"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "gemma_on_device_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1.0"
+thiserror = "2.0"
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+# HTTP download for on-device model fetching (uses rustls to avoid extra openssl deps)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+tokio-util = { version = "0.7", features = ["io"] }
+# ONNX Runtime wrapper - CPU default, EPs enabled via features
+ort = { version = "2.0.0-rc.13", features = ["half"] }
+# Tokenizer for Gemma (SentencePiece)
+tokenizers = { version = "0.22", features = [] }
+ndarray = "0.16"
+
+[features]
+default = []
+# Execution Providers - enable per target
+cuda = ["ort/cuda"]
+tensorrt = ["ort/tensorrt"]
+coreml = ["ort/coreml"]
+directml = ["ort/directml"]
+nnapi = ["ort/nnapi"]
+xnnpack = ["ort/xnnpack"]

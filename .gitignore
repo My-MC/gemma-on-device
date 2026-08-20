@@ -1,0 +1,13 @@
+/target
+/src-tauri/target
+node_modules
+dist
+dist-ssr
+*.local
+.env
+models/
+*.onnx
+*.onnx_data
+bun.lockb
+.DS_Store
+*.deb

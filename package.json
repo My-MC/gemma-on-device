@@ -1,0 +1,33 @@
+{
+  "name": "gemma-on-device",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "download:model": "bun scripts/download_model.ts",
+    "download:model:1b": "bun scripts/download_model.ts --variant 1b-int4",
+    "download:model:3n": "bun scripts/download_model.ts --variant 3n-e2b-int4",
+    "export:onnx": "python3 scripts/export_onnx.py",
+    "bench": "bun scripts/bench.ts",
+    "check:ort": "bun scripts/check_ort.ts"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-opener": "^2"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.6.0",
+    "typescript": "~5.8.3",
+    "vite": "^7.0.4",
+    "@tauri-apps/cli": "^2"
+  }
+}
