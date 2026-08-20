@@ -1,35 +1,35 @@
 # Gemma On Device — ort × Tauri × React (Bun)
 
-Gemma モバイル向けモデルを Rust `ort` (ONNX Runtime) でマルチプラットフォーム推論できるかを検証する Tauri アプリ。Desktop (Win/Mac/Linux) と Mobile (Android/iOS) を並列で検証し、画面からのモデルDL・ストリーミング推論・ベンチを備える。
+A Tauri application to validate whether Rust `ort` (ONNX Runtime) can run Gemma mobile models across platforms. Desktop (Win / Mac / Linux) and Mobile (Android / iOS) are validated in parallel with in-app model download, streaming inference, and benchmarking.
 
-- **プロダクト名**: `Gemma On Device` / **パッケージ名**: `gemma-on-device` / **identifier**: `com.gemmaondevice.app`
-- **検証ゴール**: `ort` で Gemma の ONNX が各OS/EPで推論可能か、速度/メモリ/互換性を定量評価
+- **Product name**: `Gemma On Device` / **Package name**: `gemma-on-device` / **Identifier**: `com.gemmaondevice.app`
+- **Validation goal**: whether `ort` can run Gemma ONNX on each OS / execution provider, and to quantify speed / memory / compatibility
 
-## 技術スタック
+## Tech Stack
 
-| 層 | 技術 | バージョン | 役割 |
-|---|---|---|---|
-| Rust | `ort` | `2.0.0-rc.13` (`half` feature) | ONNX Runtime wrapper, CPUデフォルト, EPsは Cargo featuresで切替 |
+| Layer | Technology | Version | Role |
+| --- | --- | --- | --- |
+| Rust | `ort` | `2.0.0-rc.13` (`half` feature) | ONNX Runtime wrapper, CPU by default, EPs switched via Cargo features |
 | Rust | `tokenizers` | `0.22` | Gemma SentencePiece JSON (`tokenizer.json`) |
-| Rust | `tauri` | `2.11.5` + `tauri-build 2.6.3` | デスクトップ/モバイルの Rust バックエンド |
-| Rust | `tokio` `futures` `reqwest` `tokio-util` | - | 非同期ランタイム + 画面DL (`rustls-tls`) |
-| Rust | `serde` `anyhow` `ndarray` | - | 通信, エラー, Tensor生成 (`[1, seq_len]` 形状) |
-| JS runtime | `Bun` | `1.3.14` | パッケージマネージャ兼ランタイム (Node互換, `package.json:scripts` は `vite` を `bun run` で実行) |
+| Rust | `tauri` | `2.11.5` + `tauri-build 2.6.3` | Desktop / mobile Rust backend |
+| Rust | `tokio` `futures` `reqwest` `tokio-util` | - | Async runtime + in-app download (`rustls-tls`) |
+| Rust | `serde` `anyhow` `ndarray` | - | IPC, errors, tensor creation (`[1, seq_len]` shape) |
+| JS runtime | `Bun` | `1.3.14` | Package manager and runtime (Node-compatible, `package.json:scripts` run `vite` via `bun run`) |
 | Frontend | `React` | `19.1.0` + `react-dom 19.1.0` | UI |
-| Frontend | `Vite` | `7.3.6` + `@vitejs/plugin-react 4.7` | ビルド, `devUrl http://localhost:1420` |
-| Frontend | `TypeScript` | `5.8.3` | 型 |
-| Tauri JS | `@tauri-apps/api` `cli` `plugin-opener` | `2.11` | `invoke`/`listen`/`emit` |
-| Models | Gemma 3 1B INT4 / 3n E2B INT4 | `onnx-community` | コミュニティONNX, INT4量子化 |
+| Frontend | `Vite` | `7.3.6` + `@vitejs/plugin-react 4.7` | Build, `devUrl http://localhost:1420` |
+| Frontend | `TypeScript` | `5.8.3` | Types |
+| Tauri JS | `@tauri-apps/api` `cli` `plugin-opener` | `2.11` | `invoke` / `listen` / `emit` |
+| Models | Gemma 3 1B INT4 / 3n E2B INT4 | `onnx-community` | Community ONNX, INT4 quantized |
 
-**JS実行**: `package.json:scripts` は `vite` を直接呼び、`bun run dev` / `bun run build` で実行。`bunx --bun vite` は使わない。
+**JS execution**: `package.json:scripts` call `vite` directly and are run via `bun run dev` / `bun run build`. Do not use `bunx --bun vite`.
 
-## アーキテクチャ
+## Architecture
 
 ```
 ┌─ React (Bun + Vite) ─────────────────────┐      Tauri IPC       ┌─ Rust (Tauri + ort) ───────────────┐
 │ src/App.tsx                               │  invoke("generate")  │ src-tauri/src/lib.rs                │
 │  - Chat + bench + streaming               │ ────────────────────►│  ├─ inference/session.rs              │
-│  - Modelsカード + DLパネル (progress)     │  listen("token")     │  │   AppState { session, model_dir }│
+│  - Models card + download panel (progress)│  listen("token")     │  │   AppState { session, model_dir }│
 │  - listen("download-progress")            │ ◄────────────────────│  │   create_session() [Level3, 4thr]│
 │  src/main.tsx                             │  listen("download-") │  ├─ inference/tokenizer.rs           │
 └───────────────────────────────────────────┘  progress            │  │   GemmaTokenizer + chat_template  │
@@ -45,13 +45,14 @@ Gemma モバイル向けモデルを Rust `ort` (ONNX Runtime) でマルチプ�
                                                                     CPU / DirectML / CUDA / CoreML / NNAPI
 ```
 
-**推論フォールバック**: `models/gemma-3-1b-it-int4.onnx` + `tokenizer.json` が無い場合は `mock_generate` でUIパイプラインを検証。配置で実推論に自動切替。
+**Inference fallback**: if `models/gemma-3-1b-it-int4.onnx` + `tokenizer.json` are missing, the app validates the UI pipeline via `mock_generate` and automatically switches to real inference once the files are placed.
 
-**モデルパス**:
-- Desktop dev: `resolve_model_dir()` → `models/` (プロジェクト直下, `bun run download:model` で作成)
-- Desktop installed / Mobile: `app.path().app_data_dir().join("models")` (`src-tauri/src/lib.rs:122` の `setup` hook)。`models/README.md` は `.gitignore`。
+**Model paths**:
 
-## プロジェクト構成
+- Desktop dev: `resolve_model_dir()` → `models/` at project root (created by `bun run download:model`)
+- Desktop installed / Mobile: `app.path().app_data_dir().join("models")` (`src-tauri/src/lib.rs:122` in `setup`). `models/` is `.gitignore`d, see `models/README.md`.
+
+## Project Structure
 
 ```
 .
@@ -60,8 +61,8 @@ Gemma モバイル向けモデルを Rust `ort` (ONNX Runtime) でマルチプ�
 ├── tsconfig.json
 ├── index.html
 ├── src/
-│   ├── App.tsx               # 画面DL, Model matrix, Inference, Bench, System
-│   ├── App.css               # download-panel / progress-bar 含む
+│   ├── App.tsx               # In-app download, model matrix, inference, bench, system
+│   ├── App.css               # download-panel / progress-bar
 │   ├── main.tsx
 │   └── assets/
 ├── src-tauri/
@@ -77,20 +78,22 @@ Gemma モバイル向けモデルを Rust `ort` (ONNX Runtime) でマルチプ�
 │           ├── tokenizer.rs  # GemmaTokenizer, apply_gemma_chat_template
 │           ├── generate.rs   # generate_text / generate_stream / mock
 │           ├── bench.rs      # run_bench
-│           └── download.rs   # download_model (reqwest stream, progress emit)
-├── models/                   # .gitignore, README.md, *.onnx + tokenizer.json (DL後)
+│           └── download.rs   # download_model (reqwest stream, progress emit, SHA256)
+├── models/                   # .gitignore, README.md, *.onnx + tokenizer.json (after download)
 ├── scripts/
-│   ├── download_model.ts     # Bun版 HF DL (onxx-community)
+│   ├── download_model.ts     # Bun HF download (onnx-community)
 │   ├── bench.ts              # CLI mock bench
-│   ├── check_ort.ts          # 環境診断
-│   └── export_onnx.py        # optimum-cli 変換
-└── dist/                     # vite build 出力 (tauri frontendDist)
+│   ├── check_ort.ts          # Environment diagnostics
+│   └── export_onnx.py        # optimum-cli conversion
+└── dist/                     # vite build output (tauri frontendDist)
 ```
 
-## 前提条件
+## Prerequisites
 
 ### 1) System (WSL Ubuntu 24.04 LTS / Linux)
-Tauri 2 Linux prerequisites ( `tauri info` で `webkit2gtk-4.1: 2.52.3` が ✓ になること ):
+
+Tauri 2 Linux prerequisites — `tauri info` should show `webkit2gtk-4.1: 2.52.3` as ✓:
+
 ```bash
 sudo apt update
 sudo apt install -y \
@@ -98,169 +101,220 @@ sudo apt install -y \
   build-essential curl wget file \
   libssl-dev libgtk-3-dev \
   libayatana-appindicator3-dev librsvg2-dev patchelf
-# pkg-config は必須 (openssl-sys, gobject-sys で必要)
+# pkg-config is required (openssl-sys, gobject-sys)
 ```
-WSLg (Windows 11) でGUI表示: `wsl --update && wsl --shutdown` 後 `echo $WAYLAND_DISPLAY` が `wayland-0` で `/mnt/wslg/` が存在すればOK。`bun run tauri dev` の `libEGL/MESA ZINK` 警告は `LIBGL_ALWAYS_SOFTWARE=1` でフォールバック、無害。
+
+For WSLg (Windows 11) GUI: run `wsl --update && wsl --shutdown`, then verify `echo $WAYLAND_DISPLAY` is `wayland-0` and `/mnt/wslg/` exists. `libEGL` / `MESA ZINK` warnings from `bun run tauri dev` fall back via `LIBGL_ALWAYS_SOFTWARE=1` and are benign.
 
 ### 2) Rust / Bun
+
 ```bash
-rustc --version  # 1.77+ (本プロジェクト 1.95で検証)
+rustc --version  # 1.77+ (verified on 1.95)
 bun --version    # 1.3.x
 ```
-Bunは `curl -fsSL https://bun.sh/install | bash`
 
-### 3) Mobile (任意)
+Install Bun via `curl -fsSL https://bun.sh/install | bash`.
+
+### 3) Mobile (optional)
+
 - **Android**: Android Studio + SDK + NDK, `rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android`, `cargo install cargo-ndk`
 - **iOS**: Xcode + `rustup target add aarch64-apple-ios aarch64-apple-ios-sim`
 
-## 起動方法
+## Getting Started
 
-### インストール
+### Install
+
 ```bash
 bun install
 ```
 
-### 開発
+### Development
+
 ```bash
-# Viteのみ (ブラウザで http://localhost:1420 を開いてReact確認)
+# Vite only (open http://localhost:1420 in browser to check React)
 bun run dev
 
-# Tauri Desktop (Rust + ort, 推奨)
-# Linux/WSLでは事前に上記 apt を済ませる
+# Tauri Desktop (Rust + ort, recommended)
+# Complete the apt prerequisites above on Linux/WSL first
 bun run tauri dev
-# 環境変数でソフトウェア描画を強制する場合:
+# Force software rendering if needed:
 GDK_BACKEND=x11 WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 LIBGL_ALWAYS_SOFTWARE=1 bun run tauri dev
 
-# 本番プレビュー
+# Production preview
 bun run build && bun run preview
 # → http://localhost:4173
 ```
 
-ウィンドウを閉じると `error: script "dev" exited with code 143` が出るが、Viteの子プロセスが `SIGTERM` で終了した正常な挙動。
+Closing the window prints `error: script "dev" exited with code 143` — this is Vite's child process exiting on `SIGTERM` and is expected.
 
-### モデル取得
+### Model Acquisition
 
-**画面から (推奨)**:
-1. `bun run tauri dev` でアプリ起動
-2. **Models** → **画面からダウンロード** → Variant選択
-   - `1b-int4` (推奨, ~1.2GB, `onnx-community/gemma-3-1b-it-ONNX`)
-   - `1b-int8` / `3n-e2b-int4` (実験的)
-3. **モデルをダウンロード** → 各ファイルのプログレスバー (`download-progress` イベント) → 完了で `model ✓` → 生成が実推論に切替
+Downloads are **SHA256-verified** (see `models/README.md` and `CONTRIBUTING.md`). After streaming to a temporary `.part` file the hash is checked before atomic rename; on mismatch the file is deleted and the command fails.
+
+**From the UI (recommended)**:
+
+1. Start the app with `bun run tauri dev`
+2. **Models** → **Download from UI** → select variant
+   - `1b-int4` (recommended, ~1.2 GB, `onnx-community/gemma-3-1b-it-ONNX`)
+   - `1b-int8` / `3n-e2b-int4` (experimental)
+3. **Download model** → per-file progress bars (`download-progress` event) → `model ✓` on completion → generation switches to real inference
 
 **CLI**:
+
 ```bash
 bun run download:model        # 1b-int4
-bun run download:model:1b     # 同上
+bun run download:model:1b     # same
 bun run download:model:3n     # 3n-e2b
 bun scripts/download_model.ts --variant 1b-int4 --out models
 ```
 
-**手動**:
+**Manual**:
+
 - https://huggingface.co/onnx-community/gemma-3-1b-it-ONNX
   - `onnx/model_int4.onnx` → `models/gemma-3-1b-it-int4.onnx`
   - `onnx/model_int4.onnx_data` → `models/gemma-3-1b-it-int4.onnx_data`
   - `tokenizer.json` → `models/tokenizer.json`
 
-`models/` は `.gitignore`。未配置でもモックでUI検証可能。
+Verify manually after download:
 
-### 推論/ベンチ
-
-**画面**:
-- Prompt入力 → **生成 (一括)** は `invoke("generate")`, **生成 (ストリーム)** は `invoke("generate_stream")` → `listen("token")` + `listen("generation-complete")` で逐次表示 (`src/App.tsx`)
-- **ベンチ実行** → `bench_inference` で `avg tok/s` / `avg latency` を表示
-
-**CLI**:
 ```bash
-bun run bench                 # mock bench (3 iter, no modelでも可)
-bun run check:ort             # rustc/cargo/ort/models/tauri-cli 診断
+sha256sum models/gemma-3-1b-it-int4.onnx
+# compare with expected hash in models/README.md
 ```
 
-### ビルド
+`models/` is `.gitignore`d. The app works in mock mode without models for UI validation.
+
+### Inference / Bench
+
+**UI**:
+
+- Enter a prompt → **Generate (single)** calls `invoke("generate")`, **Generate (stream)** calls `invoke("generate_stream")` → `listen("token")` + `listen("generation-complete")` for incremental display (`src/App.tsx`)
+- **Run bench** → `bench_inference` shows `avg tok/s` / `avg latency`
+
+**CLI**:
+
 ```bash
-bun run build                 # viteのみ
-bun run tauri build           # Tauriバンドル (src-tauri/target/release/bundle)
-# EP指定
+bun run bench                 # mock bench (3 iterations, works without model)
+bun run check:ort             # rustc/cargo/ort/models/tauri-cli diagnostics
+```
+
+### Build
+
+```bash
+bun run build                 # vite only
+bun run tauri build           # Tauri bundle (src-tauri/target/release/bundle)
+# With execution provider
 bun run tauri build -- --features cuda
 ```
 
-Desktopしきい値: 5 tok/s / Mobile: 2 tok/s (INT4)。
+Thresholds: desktop 5 tok/s / mobile 2 tok/s (INT4).
 
-## モバイル
+## Mobile
 
-### 画面DLの対応
-`src-tauri/src/lib.rs:122` の `setup` で `app_data_dir` を使用するため、Android/iOSでも画面DLは動作します:
+### In-App Download
+
+`src-tauri/src/lib.rs:122` uses `app_data_dir` in `setup`, so in-app download works on Android/iOS:
+
 - Android: `/data/data/com.gemmaondevice.app/files/models`
 - iOS: `NSApplicationSupport/models`
 
-Desktop devでは `models/` が存在すればそちらを優先し、`bun run download:model` との互換を維持。
+On desktop dev, if `models/` exists at project root it is preferred for compatibility with `bun run download:model`.
 
-### ビルド
+### Build
+
 ```bash
-# Android (要 NDK)
+# Android (requires NDK)
 bun run tauri android init
 bun run tauri android dev
 
-# iOS (要 Xcode, macOSのみ)
+# iOS (requires Xcode, macOS only)
 bun run tauri ios init
 bun run tauri ios dev
 ```
 
-`src-tauri/Cargo.toml:31` の EPs:
+Execution providers in `src-tauri/Cargo.toml:31`:
+
 - Win: `directml` / `cuda` / `tensorrt`
 - Mac: `coreml` / `cuda`
 - Linux: `cuda`
 - Android: `nnapi` / `xnnpack`
 - iOS: `coreml`
 
-メモリ目安: 1B INT4は1.2GB + 推論2-3GB RAM → 4GB+端末推奨。`3n-e2b` はPLE/MatFormerでモバイル最適化。
+Memory estimate: 1B INT4 is 1.2 GB on disk + 2-3 GB RAM at inference → 4 GB+ device recommended. `3n-e2b` is optimized for mobile with PLE / MatFormer.
 
 ## Tauri Commands
 
-`src-tauri/src/lib.rs:1` で定義:
+Defined in `src-tauri/src/lib.rs:1`:
+
 - `greet(name)` — scaffold
-- `get_system_info` — platform/arch/model_dir
+- `get_system_info` — platform / arch / model_dir
 - `check_model_status` / `get_model_info` — `ModelInfo[]`
 - `generate {prompt, maxTokens, temperature, useChatTemplate}` — `GenerateResult`
 - `generate_stream` — `emit("token")` + `emit("generation-complete")`
 - `bench_inference {iterations}` — `BenchResult`
-- `download_model {variant}` — `string[]` (保存パス), `emit("download-progress")` / `emit("download-complete")`
+- `download_model {variant}` — `string[]` (saved paths), emits `download-progress` / `download-complete`
 
-`src-tauri/capabilities/default.json` は `core:default` + `opener:default` でカスタムコマンドを許可。
+`src-tauri/capabilities/default.json` is `core:default` + `opener:default` and allows custom commands.
 
-## スクリプト
+## Scripts
 
-| スクリプト | 説明 |
-|---|---|
+| Script | Description |
+| --- | --- |
 | `bun run download:model` | `scripts/download_model.ts` (Bun, onnx-community) |
 | `bun run export:onnx` | `scripts/export_onnx.py` (`optimum-cli export onnx --quant int4`) |
 | `bun run bench` | `scripts/bench.ts` CLI bench |
-| `bun run check:ort` | `scripts/check_ort.ts` 環境診断 |
+| `bun run check:ort` | `scripts/check_ort.ts` environment diagnostics |
 
-## トラブルシュート
+## Development Workflow
 
-- `openssl-sys` / `gobject-2.0.pc` が無い → `apt` の前提条件を再実行
-- `MESA ZINK` / `libEGL` 警告 → WSLgのソフトウェアフォールバック、無害。`LIBGL_ALWAYS_SOFTWARE=1` で抑制
-- `error: script "dev" exited with code 143` → ウィンドウClose時の `SIGTERM`、正常
-- ペンギンアイコンは出るが窓が出ない → `GDK_BACKEND=x11 WEBKIT_DISABLE_COMPOSITING_MODE=1 bun run tauri dev` と `wsl --update && wsl --shutdown` を試す。代替で `bun run dev` → Windowsブラウザで `http://localhost:1420` を開く
+This project follows **GitHub Flow**. See `CONTRIBUTING.md` for the full workflow and `AGENTS.md` for agent rules.
 
-## ライセンス
+- Never commit directly to `master`. Create a feature branch per task from `master` (`feat/<scope>`, `fix/<scope>`, `chore/<scope>`, `docs/<scope>`).
+- Keep commits atomic. Each commit touching `src-tauri/` must pass the quality gates locally before commit.
+- Open a PR via `gh pr create` for every branch (Conventional prefix `feat:` / `fix:` / `chore:` / `docs:`). CI must be green before merge. Merge only via GitHub PR (Squash or Merge).
 
-検証プロジェクト。Gemmaモデルは Gemma License、ONNX Runtimeは MIT。
+### Per-Task Quality Gates (Mandatory)
 
-## 開発メモ
+After every task (feature, fix, refactor, docs touching `src-tauri/`), run in order:
 
-- `ort` の `Tensor::from_array` は `([1, seq_len], Vec<i64>)` 形式で `ndarray` バージョン差異を回避 (`src-tauri/src/inference/generate.rs:1`)
-- `anyhow` への `ort::Error` 変換は `map_err(|e| anyhow::anyhow!("{}", e))?` で `Send/Sync` 問題を回避 (`src-tauri/src/inference/session.rs:99`)
-- `SessionBuilder::with_execution_providers` は `self` をmoveするため `let mut builder = builder.with_execution_providers(...)?` と再代入
+```bash
+cargo check --manifest-path src-tauri/Cargo.toml
+cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+cargo fmt --manifest-path src-tauri/Cargo.toml -- --check  # if diff: cargo fmt --manifest-path src-tauri/Cargo.toml
+bun run build  # also runs tsc
+```
 
-## 次の検証
+- `cargo check` must be clean
+- `cargo clippy -- -D warnings` must be clean
+- `cargo fmt -- --check` must exit 0
+- If `src-tauri/` was not touched, `cargo` steps may be skipped but `bun run build` is still required
 
-- `onnx-community/gemma-3-1b-it-ONNX` INT4での実推論 `tok/s` 計測 (Desktop/Mobile)
-- `3n-E2B` への昇格 (RoPE/GQAのONNX互換)
-- EP別ベンチ (CUDA/CoreML/DirectML)
+## Troubleshooting
 
-## 参考
+- Missing `openssl-sys` / `gobject-2.0.pc` → re-run the System prerequisites `apt` step
+- `MESA ZINK` / `libEGL` warnings → WSLg software fallback, benign. Suppress with `LIBGL_ALWAYS_SOFTWARE=1`
+- `error: script "dev" exited with code 143` → `SIGTERM` on window close, expected
+- Penguin icon appears but no window → try `GDK_BACKEND=x11 WEBKIT_DISABLE_COMPOSITING_MODE=1 bun run tauri dev` and `wsl --update && wsl --shutdown`, or fallback to `bun run dev` and open `http://localhost:1420` in Windows browser
 
-- `models/README.md` — モデル詳細
-- `src-tauri/tauri.conf.json` — build/devUrl/frontendDist
-- `AGENTS.md` — エージェント向けガイド
+## License
+
+Validation project. Gemma models are under the Gemma License, ONNX Runtime is MIT.
+
+## Development Notes
+
+- `ort` `Tensor::from_array` uses `([1, seq_len], Vec<i64>)` to avoid `ndarray` version mismatch (`src-tauri/src/inference/generate.rs:124`)
+- Convert `ort::Error` to `anyhow` via `map_err(|e| anyhow::anyhow!("{}", e))?` to avoid `Send/Sync` issues (`src-tauri/src/inference/session.rs:99`)
+- `SessionBuilder::with_execution_providers` moves `self`, so reassign: `let mut builder = builder.with_execution_providers(...)?`
+
+## Next Validation
+
+- Real `tok/s` measurement on `onnx-community/gemma-3-1b-it-ONNX` INT4 (Desktop / Mobile)
+- Promotion to `3n-E2B` (ONNX compatibility for RoPE / GQA)
+- EP-specific benches (CUDA / CoreML / DirectML)
+
+## References
+
+- `models/README.md` — model details, variants, sizes, SHA256
+- `CONTRIBUTING.md` — contributor workflow (GitHub Flow, quality gates, SHA256)
+- `AGENTS.md` — agent guidelines
+- `src-tauri/tauri.conf.json` — build / devUrl / frontendDist
