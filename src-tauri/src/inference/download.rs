@@ -26,12 +26,16 @@ fn variant_specs(variant: &str) -> Result<(Vec<FileSpec>, &'static str)> {
         "1b-int4" | "default" => Ok((
             vec![
                 FileSpec {
-                    url_path: "onnx/model_int4.onnx",
+                    url_path: "onnx/model_q4.onnx",
                     dest_name: "gemma-3-1b-it-int4.onnx",
                 },
+                // Must keep the upstream filename verbatim: the .onnx file's
+                // external_data location is the literal string
+                // "model_q4.onnx_data", resolved by ort relative to this
+                // directory. Renaming this file breaks external-data loading.
                 FileSpec {
-                    url_path: "onnx/model_int4.onnx_data",
-                    dest_name: "gemma-3-1b-it-int4.onnx_data",
+                    url_path: "onnx/model_q4.onnx_data",
+                    dest_name: "model_q4.onnx_data",
                 },
                 FileSpec {
                     url_path: "tokenizer.json",
@@ -42,13 +46,10 @@ fn variant_specs(variant: &str) -> Result<(Vec<FileSpec>, &'static str)> {
         )),
         "1b-int8" => Ok((
             vec![
+                // model_int8.onnx is self-contained (no external onnx_data file)
                 FileSpec {
                     url_path: "onnx/model_int8.onnx",
                     dest_name: "gemma-3-1b-it-int8.onnx",
-                },
-                FileSpec {
-                    url_path: "onnx/model_int8.onnx_data",
-                    dest_name: "gemma-3-1b-it-int8.onnx_data",
                 },
                 FileSpec {
                     url_path: "tokenizer.json",
@@ -57,19 +58,12 @@ fn variant_specs(variant: &str) -> Result<(Vec<FileSpec>, &'static str)> {
             ],
             "onnx-community/gemma-3-1b-it-ONNX",
         )),
-        "3n-e2b-int4" => Ok((
-            vec![
-                FileSpec {
-                    url_path: "onnx/model_int4.onnx",
-                    dest_name: "gemma-3n-E2B-it-int4.onnx",
-                },
-                FileSpec {
-                    url_path: "tokenizer.json",
-                    dest_name: "tokenizer.json",
-                },
-            ],
-            "onnx-community/gemma-3n-E2B-it-ONNX",
-        )),
+        "3n-e2b-int4" => anyhow::bail!(
+            "3n-e2b-int4 is not yet supported: onnx-community/gemma-3n-E2B-it-ONNX ships \
+             a multi-component graph (embed_tokens / decoder_model_merged / vision_encoder / \
+             audio_encoder), not a single ONNX file, and this app's session loader only \
+             supports single-file models. Use 1b-int4 or 1b-int8 instead."
+        ),
         _ => anyhow::bail!("unknown variant: {variant} (choose 1b-int4, 1b-int8, 3n-e2b-int4)"),
     }
 }

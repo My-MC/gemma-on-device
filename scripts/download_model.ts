@@ -16,19 +16,22 @@ type Variant = "1b-int4" | "1b-int8" | "3n-e2b-int4";
 const VARIANTS: Record<Variant, { repo: string; files: string[]; desc: string }> = {
   "1b-int4": {
     repo: "onnx-community/gemma-3-1b-it-ONNX",
-    files: ["onnx/model_int4.onnx", "onnx/model_int4.onnx_data", "tokenizer.json", "tokenizer_config.json", "config.json"],
+    files: ["onnx/model_q4.onnx", "onnx/model_q4.onnx_data", "tokenizer.json", "tokenizer_config.json", "config.json"],
     desc: "Gemma 3 1B INT4 (Phase1, community ONNX)",
   },
   "1b-int8": {
     repo: "onnx-community/gemma-3-1b-it-ONNX",
-    files: ["onnx/model_int8.onnx", "onnx/model_int8.onnx_data", "tokenizer.json", "tokenizer_config.json", "config.json"],
+    // model_int8.onnx is self-contained (no external onnx_data file)
+    files: ["onnx/model_int8.onnx", "tokenizer.json", "tokenizer_config.json", "config.json"],
     desc: "Gemma 3 1B INT8",
   },
   "3n-e2b-int4": {
     repo: "onnx-community/gemma-3n-E2B-it-ONNX",
-    // Note: 3n ONNX may not exist yet; fallback will try google/gemma-3n-E2B-it source
-    files: ["onnx/model_int4.onnx", "tokenizer.json", "tokenizer_config.json", "config.json"],
-    desc: "Gemma 3n E2B INT4 (Phase2, mobile optimized)",
+    // Note: this repo ships a multi-component graph (embed_tokens /
+    // decoder_model_merged / vision_encoder / audio_encoder), not a single
+    // model_int4.onnx. Not yet supported by this app's single-file loader.
+    files: ["tokenizer.json", "tokenizer_config.json", "config.json"],
+    desc: "Gemma 3n E2B INT4 (Phase2, mobile optimized) — NOT YET SUPPORTED, see note above",
   },
 };
 
@@ -44,10 +47,17 @@ async function downloadFile(url: string, dest: string, token?: string) {
   console.log(`  ✓ ${dest} (${(buf.byteLength / 1024 / 1024).toFixed(1)} MB)`);
 }
 
+function getArg(args: string[], flag: string): string | undefined {
+  const eq = args.find((a) => a.startsWith(`${flag}=`));
+  if (eq) return eq.split("=")[1];
+  const idx = args.indexOf(flag);
+  return idx !== -1 ? args[idx + 1] : undefined;
+}
+
 async function main() {
   const args = process.argv.slice(2);
-  const variantArg = args.find((a) => a.startsWith("--variant="))?.split("=")[1] ?? args[args.indexOf("--variant") + 1];
-  const outArg = args.find((a) => a.startsWith("--out="))?.split("=")[1] ?? args[args.indexOf("--out") + 1];
+  const variantArg = getArg(args, "--variant");
+  const outArg = getArg(args, "--out");
   const variant: Variant = (variantArg as Variant) ?? "1b-int4";
   const outDir = outArg ?? "models";
 
@@ -71,25 +81,21 @@ async function main() {
     // Simplify dest: flatten onnx/ prefix
     const destName = file.replace("onnx/", "");
     const dest = `${outDir}/${destName}`;
-    // Map model file to expected name for AppState
+    // Map model file to expected name for AppState. The onnx_data companion
+    // is NOT renamed: its filename is referenced verbatim inside the .onnx
+    // file's external_data location, so it must stay as downloaded.
     let finalDest = dest;
-    if (destName === "model_int4.onnx") {
-      finalDest = `${outDir}/${variant.includes("3n") ? "gemma-3n-E2B-it-int4.onnx" : "gemma-3-1b-it-int4.onnx"}`;
+    if (destName === "model_q4.onnx") {
+      finalDest = `${outDir}/gemma-3-1b-it-int4.onnx`;
     }
     if (destName === "model_int8.onnx") {
       finalDest = `${outDir}/gemma-3-1b-it-int8.onnx`;
-    }
-    if (destName === "model_int4.onnx_data") {
-      finalDest = `${outDir}/${variant.includes("3n") ? "gemma-3n-E2B-it-int4.onnx_data" : "gemma-3-1b-it-int4.onnx_data"}`;
     }
     try {
       console.log(`  ↓ ${file} -> ${finalDest}`);
       await downloadFile(url, finalDest, token);
     } catch (e: any) {
       console.warn(`  ✗ ${file}: ${e.message}`);
-      if (file.includes("model_int4") && variant === "3n-e2b-int4") {
-        console.warn(`  Hint: 3n ONNX may not be available yet. Use --variant 1b-int4 or run: python scripts/export_onnx.py`);
-      }
     }
   }
 
