@@ -20,6 +20,9 @@ pub struct BenchResult {
 }
 
 pub async fn run_bench(state: &AppState, iterations: usize) -> anyhow::Result<BenchResult> {
+    if iterations == 0 {
+        anyhow::bail!("iterations must be > 0");
+    }
     let prompt = "こんにちは、Gemmaの推論速度を計測しています。";
     let mut total_tokens = 0;
     let mut total_latency_ms: f64 = 0.0;

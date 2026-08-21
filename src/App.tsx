@@ -97,22 +97,27 @@ export default function App() {
 
     const setup = async () => {
       const u1 = await listen<string>("token", (e) => {
-        setStreamTokens((prev) => {
-          const next = [...prev, e.payload];
-          streamTokensRef.current = next;
-          return next;
-        });
+        const next = [...streamTokensRef.current, e.payload];
+        streamTokensRef.current = next;
+        setStreamTokens(next);
       });
-      if (!cancelled) unlistenFns.push(u1);
-      else u1();
+      if (cancelled) {
+        u1();
+        return;
+      }
+      unlistenFns.push(u1);
 
       const u2 = await listen<GenerateResult>("generation-complete", (e) => {
         setResult(e.payload);
         setIsGenerating(false);
         setIsStreaming(false);
       });
-      if (!cancelled) unlistenFns.push(u2);
-      else u2();
+      if (cancelled) {
+        u2();
+        unlistenFns.forEach((fn) => fn());
+        return;
+      }
+      unlistenFns.push(u2);
 
       const u3 = await listen<DownloadProgress>("download-progress", (e) => {
         setDownloadProgress((prev) => ({ ...prev, [e.payload.file]: e.payload }));
@@ -120,18 +125,29 @@ export default function App() {
           setDownloadError(e.payload.error);
         }
       });
-      if (!cancelled) unlistenFns.push(u3);
-      else u3();
+      if (cancelled) {
+        u3();
+        unlistenFns.forEach((fn) => fn());
+        return;
+      }
+      unlistenFns.push(u3);
 
       const u4 = await listen<string[]>("download-complete", (e) => {
         setDownloadComplete(e.payload);
         setDownloading(false);
         invoke<ModelInfo[]>("get_model_info").then(setModels).catch(() => {});
       });
-      if (!cancelled) unlistenFns.push(u4);
-      else u4();
+      if (cancelled) {
+        u4();
+        unlistenFns.forEach((fn) => fn());
+        return;
+      }
+      unlistenFns.push(u4);
     };
-    setup();
+    setup().catch((e) => {
+      console.error("listener setup failed", e);
+      unlistenFns.forEach((fn) => fn());
+    });
 
     return () => {
       cancelled = true;

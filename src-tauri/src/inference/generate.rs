@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
 use super::session::AppState;
-use super::tokenizer::{apply_gemma_chat_template, load_tokenizer, mock_detokenize};
+use super::tokenizer::{apply_gemma_chat_template, load_tokenizer};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateOptions {
@@ -112,9 +112,41 @@ pub async fn generate_stream(
         return Ok(res);
     }
 
-    match inner_generate(state, &prompt, max_tokens, temperature, Some(&emit)).await {
+    // Track whether any real token was emitted to avoid mock fallback after partial stream
+    let emitted_any = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let emitted_clone = emitted_any.clone();
+    let tracking_emit = |s: String| -> Result<()> {
+        emitted_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+        emit(s)
+    };
+
+    match inner_generate(
+        state,
+        &prompt,
+        max_tokens,
+        temperature,
+        Some(&tracking_emit),
+    )
+    .await
+    {
         Ok(res) => Ok(res),
         Err(e) => {
+            if emitted_any.load(std::sync::atomic::Ordering::SeqCst) {
+                // Partial stream already sent — return error without mock fallback
+                eprintln!("[ort] stream failed after emitting tokens: {e:?}");
+                // Try to decode partial if possible; fallback to empty
+                return Ok(GenerateResult {
+                    text: String::new(),
+                    prompt_tokens: 0,
+                    generated_tokens: 0,
+                    total_tokens: 0,
+                    latency_ms: 0,
+                    tokens_per_sec: 0.0,
+                    is_mock: false,
+                    model_id: "gemma-3-1b-it-INT4".to_string(),
+                    error: Some(format!("stream interrupted: {e}")),
+                });
+            }
             eprintln!("[ort] real stream failed, falling back to mock: {e:?}");
             let mut mock = mock_generate(&opts.prompt, max_tokens);
             mock.error = Some(format!("real stream failed: {e}"));
@@ -196,36 +228,124 @@ async fn inner_generate(
         let mask_tensor = Tensor::from_array(([1, seq_len], vec![1i64; seq_len]))
             .map_err(|e| anyhow::anyhow!("mask tensor error: {e}"))?;
 
-        let outputs = if has_mask {
+        let outputs = match if has_mask {
             session
                 .session
                 .run(ort::inputs!["input_ids" => input_tensor, "attention_mask" => mask_tensor])
-                .map_err(|e| anyhow::anyhow!("ort run error (with mask): {e}"))?
+                .map_err(|e| anyhow::anyhow!("ort run error (with mask): {e}"))
         } else {
             session
                 .session
                 .run(ort::inputs!["input_ids" => input_tensor])
-                .map_err(|e| anyhow::anyhow!("ort run error: {e}"))?
+                .map_err(|e| anyhow::anyhow!("ort run error: {e}"))
+        } {
+            Ok(o) => o,
+            Err(e) => {
+                if !generated_ids.is_empty() {
+                    let text = tokenizer
+                        .decode(&generated_ids, true)
+                        .unwrap_or_else(|_| full_text.clone());
+                    let latency_ms = start.elapsed().as_millis() as u64;
+                    let tokens_per_sec =
+                        generated_ids.len() as f64 / (latency_ms as f64 / 1000.0).max(0.001);
+                    return Ok(GenerateResult {
+                        text,
+                        prompt_tokens,
+                        generated_tokens: generated_ids.len(),
+                        total_tokens: prompt_tokens + generated_ids.len(),
+                        latency_ms,
+                        tokens_per_sec,
+                        is_mock: false,
+                        model_id: "gemma-3-1b-it-INT4".to_string(),
+                        error: Some(format!("interrupted: {e}")),
+                    });
+                }
+                return Err(e);
+            }
         };
 
-        let (vocab, seq, data_f32): (usize, usize, Vec<f32>) = {
+        let (vocab, seq, data_f32): (usize, usize, Vec<f32>) = match {
             if let Ok((shape, data)) = outputs[0].try_extract_tensor::<f32>() {
                 let (v, s) = parse_logits_shape(shape)?;
-                (v, s, data.to_vec())
+                Ok((v, s, data.to_vec()))
             } else if let Ok((shape, data)) = outputs[0].try_extract_tensor::<f16>() {
                 let (v, s) = parse_logits_shape(shape)?;
                 let converted: Vec<f32> = data.iter().map(|x| x.to_f32()).collect();
-                (v, s, converted)
+                Ok((v, s, converted))
             } else {
-                anyhow::bail!("logits extraction failed: expected f32 or f16");
+                Err(anyhow::anyhow!(
+                    "logits extraction failed: expected f32 or f16"
+                ))
+            }
+        } {
+            Ok(v) => v,
+            Err(e) => {
+                if !generated_ids.is_empty() {
+                    let text = tokenizer
+                        .decode(&generated_ids, true)
+                        .unwrap_or_else(|_| full_text.clone());
+                    let latency_ms = start.elapsed().as_millis() as u64;
+                    let tokens_per_sec =
+                        generated_ids.len() as f64 / (latency_ms as f64 / 1000.0).max(0.001);
+                    return Ok(GenerateResult {
+                        text,
+                        prompt_tokens,
+                        generated_tokens: generated_ids.len(),
+                        total_tokens: prompt_tokens + generated_ids.len(),
+                        latency_ms,
+                        tokens_per_sec,
+                        is_mock: false,
+                        model_id: "gemma-3-1b-it-INT4".to_string(),
+                        error: Some(format!("interrupted: {e}")),
+                    });
+                }
+                return Err(e);
             }
         };
 
         if vocab == 0 || seq == 0 {
+            if !generated_ids.is_empty() {
+                let text = tokenizer
+                    .decode(&generated_ids, true)
+                    .unwrap_or_else(|_| full_text.clone());
+                let latency_ms = start.elapsed().as_millis() as u64;
+                let tokens_per_sec =
+                    generated_ids.len() as f64 / (latency_ms as f64 / 1000.0).max(0.001);
+                return Ok(GenerateResult {
+                    text,
+                    prompt_tokens,
+                    generated_tokens: generated_ids.len(),
+                    total_tokens: prompt_tokens + generated_ids.len(),
+                    latency_ms,
+                    tokens_per_sec,
+                    is_mock: false,
+                    model_id: "gemma-3-1b-it-INT4".to_string(),
+                    error: Some(format!("invalid logits shape vocab={vocab} seq={seq}")),
+                });
+            }
             anyhow::bail!("invalid logits shape vocab={vocab} seq={seq}");
         }
         let last_offset = (seq - 1) * vocab;
         if last_offset + vocab > data_f32.len() {
+            if !generated_ids.is_empty() {
+                let text = tokenizer
+                    .decode(&generated_ids, true)
+                    .unwrap_or_else(|_| full_text.clone());
+                let latency_ms = start.elapsed().as_millis() as u64;
+                let tokens_per_sec =
+                    generated_ids.len() as f64 / (latency_ms as f64 / 1000.0).max(0.001);
+                return Ok(GenerateResult {
+                    text,
+                    prompt_tokens,
+                    generated_tokens: generated_ids.len(),
+                    total_tokens: prompt_tokens + generated_ids.len(),
+                    latency_ms,
+                    tokens_per_sec,
+                    is_mock: false,
+                    model_id: "gemma-3-1b-it-INT4".to_string(),
+                    error: Some("logits data length mismatch".to_string()),
+                });
+            }
             anyhow::bail!("logits data length mismatch");
         }
         let last_logits = &data_f32[last_offset..last_offset + vocab];
@@ -252,7 +372,7 @@ async fn inner_generate(
     }
 
     let text = if generated_ids.is_empty() {
-        mock_detokenize(&current_ids)
+        String::new()
     } else if emit.is_some() {
         if full_text.is_empty() {
             tokenizer
