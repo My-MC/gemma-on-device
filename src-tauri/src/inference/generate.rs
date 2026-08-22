@@ -235,6 +235,7 @@ pub async fn generate_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
 
     #[tokio::test]
     #[ignore]
@@ -250,5 +251,30 @@ mod tests {
         let result = generate_text(&state, opts).await.expect("real inference");
         assert!(!result.is_mock);
         assert!(!result.text.is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn real_streaming_inference_smoke() {
+        let state = AppState::new(std::path::PathBuf::from("../models"));
+        let opts = GenerateOptions {
+            prompt: "こんにちは".to_string(),
+            max_tokens: Some(8),
+            temperature: None,
+            use_chat_template: Some(true),
+        };
+        let emitted = Arc::new(Mutex::new(Vec::<String>::new()));
+        let emitted_for_callback = Arc::clone(&emitted);
+
+        let result = generate_stream(&state, opts, move |token| {
+            emitted_for_callback.lock().unwrap().push(token);
+            Ok(())
+        })
+        .await
+        .expect("real streaming inference");
+
+        assert!(!result.is_mock);
+        assert!(!result.text.is_empty());
+        assert!(!emitted.lock().unwrap().is_empty());
     }
 }
