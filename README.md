@@ -237,10 +237,28 @@ On desktop dev, if `models/` exists at project root it is preferred for compatib
 bun run tauri android init
 bun run tauri android dev
 
-# iOS (requires Xcode, macOS only)
+# iOS 15.1+ (requires Xcode, macOS only)
+rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+brew install xcodegen libimobiledevice cocoapods
 bun run tauri ios init
-bun run tauri ios dev
+bun run tauri ios dev "Your iPhone"
+
+# Signed debug IPA
+bun run tauri ios build --debug --target aarch64 --export-method debugging --ci
 ```
+
+The generated Xcode project lives in `src-tauri/gen/apple`. Set
+`bundle.iOS.developmentTeam` in `src-tauri/tauri.conf.json` to the team reported
+by `bun run tauri info`. The checked-in project targets iOS 15.1 because the
+prebuilt ONNX Runtime objects require iOS 15.1 or later. If `tauri ios init` is
+run again with Tauri CLI 2.11.4, verify that `project.yml` and `Podfile` still
+specify 15.1 before building.
+
+For a physical device, connect and unlock the iPhone, trust the Mac, enable
+Developer Mode, and confirm that it appears under `xcrun xctrace list devices`.
+The first launch has no bundled model; use the in-app download button to place
+the INT4 model in the app sandbox. Allow about 1.2 GB of storage for model files
+and 2–3 GB of working memory during inference.
 
 Execution providers in `src-tauri/Cargo.toml:31`:
 
@@ -249,7 +267,7 @@ Execution providers in `src-tauri/Cargo.toml:31`:
 - Intel Mac: `coreml` (explicit Cargo feature)
 - Linux: `cuda`
 - Android: `nnapi` / `xnnpack`
-- iOS: `coreml`
+- iOS: `coreml` is enabled automatically (GPU + CPU fallback)
 
 Memory estimate: 1B INT4 is 1.2 GB on disk + 2-3 GB RAM at inference → 4 GB+ device recommended. `3n-e2b` is optimized for mobile with PLE / MatFormer.
 

@@ -29,12 +29,15 @@ pub struct InferenceSession {
     pub model_info: ModelInfo,
 }
 
-const APPLE_SILICON_COREML: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
+const APPLE_COREML: bool = cfg!(any(
+    target_os = "ios",
+    all(target_os = "macos", target_arch = "aarch64")
+));
 
 /// Execution provider selected first for this build. Unsupported CoreML nodes
 /// continue on ONNX Runtime's CPU provider.
 pub fn preferred_execution_provider() -> &'static str {
-    if APPLE_SILICON_COREML || cfg!(feature = "coreml") {
+    if APPLE_COREML || cfg!(feature = "coreml") {
         "CoreML (GPU + CPU fallback)"
     } else if cfg!(feature = "tensorrt") {
         "TensorRT"
@@ -128,13 +131,21 @@ pub fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Session> {
         .with_intra_threads(4)
         .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-    #[cfg(any(feature = "coreml", all(target_os = "macos", target_arch = "aarch64")))]
+    #[cfg(any(
+        feature = "coreml",
+        target_os = "ios",
+        all(target_os = "macos", target_arch = "aarch64")
+    ))]
     let coreml_cache_dir = model_path
         .as_ref()
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join(".coreml-cache");
-    #[cfg(any(feature = "coreml", all(target_os = "macos", target_arch = "aarch64")))]
+    #[cfg(any(
+        feature = "coreml",
+        target_os = "ios",
+        all(target_os = "macos", target_arch = "aarch64")
+    ))]
     std::fs::create_dir_all(&coreml_cache_dir)?;
 
     // Execution providers are ordered by priority and unsupported nodes fall
@@ -147,7 +158,11 @@ pub fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Session> {
             ort::ep::CUDA::default().build(),
             #[cfg(feature = "directml")]
             ort::ep::DirectML::default().build(),
-            #[cfg(any(feature = "coreml", all(target_os = "macos", target_arch = "aarch64")))]
+            #[cfg(any(
+                feature = "coreml",
+                target_os = "ios",
+                all(target_os = "macos", target_arch = "aarch64")
+            ))]
             {
                 let profile_compute_plan =
                     std::env::var("GEMMA_COREML_PROFILE").as_deref() == Ok("1");
