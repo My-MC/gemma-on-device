@@ -40,3 +40,8 @@ coreml = ["ort/coreml"]
 directml = ["ort/directml"]
 nnapi = ["ort/nnapi"]
 xnnpack = ["ort/xnnpack"]
+
+# Apple Silicon desktop builds include CoreML automatically. The explicit
+# `coreml` feature remains available for iOS and other Apple targets.
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
+ort = { version = "2.0.0-rc.13", features = ["half", "coreml"] }

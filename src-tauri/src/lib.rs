@@ -1,7 +1,7 @@
 mod inference;
 
 use inference::generate::{GenerateOptions, GenerateResult};
-use inference::session::{resolve_model_dir, AppState, ModelInfo};
+use inference::session::{preferred_execution_provider, resolve_model_dir, AppState, ModelInfo};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager, State};
 
@@ -17,6 +17,7 @@ pub struct SystemInfo {
     pub arch: String,
     pub tauri_version: String,
     pub ort_available: bool,
+    pub execution_provider: String,
     pub model_dir: String,
 }
 
@@ -27,6 +28,7 @@ async fn get_system_info(state: State<'_, AppState>) -> Result<SystemInfo, Strin
         arch: std::env::consts::ARCH.to_string(),
         tauri_version: "2".to_string(),
         ort_available: true,
+        execution_provider: preferred_execution_provider().to_string(),
         model_dir: state.model_dir.to_string_lossy().to_string(),
     })
 }
@@ -112,7 +114,8 @@ async fn download_model(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Ensure ort is initialized once at startup (CPU default)
+    // Ensure ort is initialized once at startup. Sessions register the
+    // platform-appropriate execution provider when a model is loaded.
     let _ = ort::init().commit();
 
     tauri::Builder::default()

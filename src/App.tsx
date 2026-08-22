@@ -42,6 +42,7 @@ type SystemInfo = {
   arch: string;
   tauri_version: string;
   ort_available: boolean;
+  execution_provider: string;
   model_dir: string;
 };
 
@@ -239,7 +240,7 @@ export default function App() {
             <div><strong>Platform</strong> {system.platform}/{system.arch}</div>
             <div><strong>Model dir</strong> <code>{system.model_dir}</code></div>
             <div><strong>Tauri</strong> {system.tauri_version}</div>
-            <div><strong>ort</strong> {system.ort_available ? "available (CPU default, EPs via features)" : "unavailable"}</div>
+            <div><strong>ort</strong> {system.ort_available ? `available · ${system.execution_provider}` : "unavailable"}</div>
           </div>
         </section>
       )}
@@ -440,12 +441,12 @@ export default function App() {
           <li><code>bun install</code> — 依存取得</li>
           <li>画面の「モデルをダウンロード」または <code>bun run download:model</code> — Gemma 1B INT4 + tokenizer 取得</li>
           <li><code>bun run dev</code> — Viteのみ (ブラウザ確認)</li>
-          <li><code>bun run tauri dev</code> — Desktop推論</li>
+          <li><code>bun run tauri dev</code> — Desktop推論 (Apple SiliconはCoreML GPUを自動使用)</li>
           <li><code>bun run tauri android dev</code> / <code>bun run tauri ios dev</code> — モバイル (要 NDK/Xcode, 並列検証)</li>
           <li><code>bun run tauri build</code> — バンドル / <code>bun run bench</code> — CLIベンチ</li>
         </ol>
         <div className="ep-matrix">
-          <strong>EP matrix (ort features):</strong> Win: CPU/DirectML/CUDA · Mac: CPU/CoreML · Linux: CPU/CUDA · Android: CPU/NNAPI/XNNPACK · iOS: CPU/CoreML
+          <strong>EP matrix:</strong> Win: CPU/DirectML/CUDA · Apple Silicon Mac: CoreML GPU (自動) · Intel Mac: CPU/CoreML · Linux: CPU/CUDA · Android: CPU/NNAPI/XNNPACK · iOS: CPU/CoreML
         </div>
       </section>
 
