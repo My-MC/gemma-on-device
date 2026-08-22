@@ -91,40 +91,47 @@ export default function App() {
     invoke<ModelInfo[]>("check_model_status").then(setModels).catch(() => {});
     invoke<string>("greet", { name: "Gemma" }).catch(() => {});
 
-    // Listen for streaming tokens
-    let unlistenToken: (() => void) | null = null;
-    let unlistenComplete: (() => void) | null = null;
-    let unlistenDlProgress: (() => void) | null = null;
-    let unlistenDlComplete: (() => void) | null = null;
+    // StrictMode may clean up this effect before async listener registration
+    // resolves. Immediately remove listeners that belong to a stale effect.
+    let disposed = false;
+    const unlisteners: Array<() => void> = [];
+    const retainListener = (registration: Promise<() => void>) => {
+      void registration.then((unlisten) => {
+        if (disposed) {
+          unlisten();
+        } else {
+          unlisteners.push(unlisten);
+        }
+      });
+    };
 
-    listen<string>("token", (e) => {
+    retainListener(listen<string>("token", (e) => {
       setStreamTokens((prev) => [...prev, e.payload]);
-    }).then((f) => (unlistenToken = f));
-    listen<GenerateResult>("generation-complete", (e) => {
+    }));
+    retainListener(listen<GenerateResult>("generation-complete", (e) => {
       setResult(e.payload);
       setIsGenerating(false);
       setIsStreaming(false);
-    }).then((f) => (unlistenComplete = f));
+    }));
 
-    listen<DownloadProgress>("download-progress", (e) => {
+    retainListener(listen<DownloadProgress>("download-progress", (e) => {
       setDownloadProgress((prev) => ({ ...prev, [e.payload.file]: e.payload }));
       if (e.payload.error) {
         setDownloadError(e.payload.error);
       }
-    }).then((f) => (unlistenDlProgress = f));
+    }));
 
-    listen<string[]>("download-complete", (e) => {
+    retainListener(listen<string[]>("download-complete", (e) => {
       setDownloadComplete(e.payload);
       setDownloading(false);
       // refresh model status
       invoke<ModelInfo[]>("get_model_info").then(setModels).catch(() => {});
-    }).then((f) => (unlistenDlComplete = f));
+    }));
 
     return () => {
-      if (unlistenToken) unlistenToken();
-      if (unlistenComplete) unlistenComplete();
-      if (unlistenDlProgress) unlistenDlProgress();
-      if (unlistenDlComplete) unlistenDlComplete();
+      disposed = true;
+      unlisteners.forEach((unlisten) => unlisten());
+      unlisteners.length = 0;
     };
   }, []);
 
