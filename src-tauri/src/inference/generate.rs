@@ -1,10 +1,18 @@
 use anyhow::Result;
+use ort::session::SessionInputValue;
 use ort::value::Tensor;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
 use super::session::AppState;
 use super::tokenizer::{apply_gemma_chat_template, load_tokenizer, mock_detokenize};
+
+// Gemma 3 1B's decoder-with-past graph requires explicit attention-mask and
+// KV-cache inputs. Until cache reuse is implemented, each step supplies an
+// empty cache and re-runs the complete growing sequence.
+const NUM_LAYERS: usize = 26;
+const NUM_KV_HEADS: usize = 1;
+const HEAD_DIM: usize = 256;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateOptions {
@@ -44,14 +52,9 @@ pub async fn generate_text(state: &AppState, opts: GenerateOptions) -> Result<Ge
         return Ok(mock_generate(&opts.prompt, max_tokens));
     }
 
-    // Try real inference, fallback to mock on error
-    match try_real_inference(state, &prompt, max_tokens).await {
-        Ok(res) => Ok(res),
-        Err(e) => {
-            eprintln!("[ort] real inference failed, falling back to mock: {e:?}");
-            Ok(mock_generate(&opts.prompt, max_tokens))
-        }
-    }
+    // Once model files exist, inference errors must be visible to the caller;
+    // silently returning mock output makes a broken real setup look healthy.
+    try_real_inference(state, &prompt, max_tokens).await
 }
 
 fn mock_generate(prompt: &str, max_tokens: usize) -> GenerateResult {
@@ -118,17 +121,32 @@ async fn try_real_inference(
     for _ in 0..max_tokens {
         let seq_len = current_ids.len();
         // Use tuple (shape, Vec) to avoid ndarray version mismatch with ort's private ndarray
-        let input_tensor = Tensor::from_array(([1, seq_len], current_ids.clone()))
+        let input_ids_tensor = Tensor::from_array(([1, seq_len], current_ids.clone()))
+            .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
+        let attention_mask_tensor = Tensor::from_array(([1, seq_len], vec![1i64; seq_len]))
             .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
 
-        // Model may expect "input_ids" and "attention_mask" - try common names
+        let mut inputs: Vec<(String, SessionInputValue)> = vec![
+            ("input_ids".to_string(), input_ids_tensor.into()),
+            ("attention_mask".to_string(), attention_mask_tensor.into()),
+        ];
+        for layer in 0..NUM_LAYERS {
+            let empty_key =
+                Tensor::<f32>::from_array(([1, NUM_KV_HEADS, 0, HEAD_DIM], Vec::<f32>::new()))
+                    .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
+            let empty_value =
+                Tensor::<f32>::from_array(([1, NUM_KV_HEADS, 0, HEAD_DIM], Vec::<f32>::new()))
+                    .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
+            inputs.push((format!("past_key_values.{layer}.key"), empty_key.into()));
+            inputs.push((format!("past_key_values.{layer}.value"), empty_value.into()));
+        }
+
         let outputs = session
             .session
-            .run(ort::inputs!["input_ids" => input_tensor])
+            .run(inputs)
             .map_err(|e| anyhow::anyhow!("ort run error: {e}"))?;
 
-        // Assume output 0 is logits: [1, seq_len, vocab_size]
-        let logits = outputs[0]
+        let logits = outputs["logits"]
             .try_extract_tensor::<f32>()
             .map_err(|e| anyhow::anyhow!("extract error: {e}"))?;
         let (shape, data) = logits;
@@ -212,4 +230,25 @@ pub async fn generate_stream(
         }
     }
     Ok(res)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore]
+    async fn real_inference_smoke() {
+        let state = AppState::new(std::path::PathBuf::from("../models"));
+        let opts = GenerateOptions {
+            prompt: "こんにちは".to_string(),
+            max_tokens: Some(8),
+            temperature: None,
+            use_chat_template: Some(true),
+        };
+
+        let result = generate_text(&state, opts).await.expect("real inference");
+        assert!(!result.is_mock);
+        assert!(!result.text.is_empty());
+    }
 }
