@@ -118,7 +118,7 @@ async fn try_real_inference(
     let mut generated_ids: Vec<i64> = Vec::new();
     let mut current_ids = input_ids.clone();
     let mut cache: Option<Vec<(Vec<f32>, Vec<f32>)>> = None;
-    let mut emitted_text = String::new();
+    let mut decode_stream = emit.map(|_| tokenizer.inner().decode_stream(true));
 
     for _ in 0..max_tokens {
         let seq_len = current_ids.len();
@@ -197,17 +197,12 @@ async fn try_real_inference(
         generated_ids.push(next_id);
         current_ids = vec![next_id];
 
-        if let Some(emit) = emit {
-            let decoded = tokenizer
-                .decode(&generated_ids, true)
-                .map_err(|e| anyhow::anyhow!("decode error: {e}"))?;
-            let delta = decoded
-                .strip_prefix(&emitted_text)
-                .unwrap_or(&decoded)
-                .to_string();
-            emitted_text = decoded;
-            if !delta.is_empty() {
-                emit(delta)?;
+        if let (Some(emit), Some(decoder)) = (emit, decode_stream.as_mut()) {
+            if let Some(text) = decoder
+                .step(next_id as u32)
+                .map_err(|e| anyhow::anyhow!("stream decode error: {e}"))?
+            {
+                emit(text)?;
             }
         }
 
@@ -322,6 +317,8 @@ mod tests {
 
         assert!(!result.is_mock);
         assert!(!result.text.is_empty());
-        assert!(!emitted.lock().unwrap().is_empty());
+        let streamed = emitted.lock().unwrap().concat();
+        assert!(!streamed.is_empty());
+        assert_eq!(streamed, result.text);
     }
 }

@@ -28,6 +28,10 @@ impl GemmaTokenizer {
             .map_err(|e| anyhow::anyhow!("{}", e))
     }
 
+    pub(crate) fn inner(&self) -> &Tokenizer {
+        &self.inner
+    }
+
     #[allow(dead_code)]
     pub fn vocab_size(&self) -> usize {
         self.inner.get_vocab_size(true)

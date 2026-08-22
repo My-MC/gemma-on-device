@@ -394,7 +394,7 @@ export default function App() {
 
           {isStreaming && streamTokens.length > 0 && (
             <div className="stream-box">
-              <div className="stream-label">streaming… {streamTokens.length} tokens</div>
+              <div className="stream-label">streaming… {streamTokens.length} updates</div>
               <div className="stream-text">{streamTokens.join("")}</div>
             </div>
           )}
