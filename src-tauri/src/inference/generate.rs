@@ -8,8 +8,7 @@ use super::session::AppState;
 use super::tokenizer::{apply_gemma_chat_template, load_tokenizer, mock_detokenize};
 
 // Gemma 3 1B's decoder-with-past graph requires explicit attention-mask and
-// KV-cache inputs. Until cache reuse is implemented, each step supplies an
-// empty cache and re-runs the complete growing sequence.
+// KV-cache inputs.
 const NUM_LAYERS: usize = 26;
 const NUM_KV_HEADS: usize = 1;
 const HEAD_DIM: usize = 256;
@@ -54,7 +53,7 @@ pub async fn generate_text(state: &AppState, opts: GenerateOptions) -> Result<Ge
 
     // Once model files exist, inference errors must be visible to the caller;
     // silently returning mock output makes a broken real setup look healthy.
-    try_real_inference(state, &prompt, max_tokens).await
+    try_real_inference(state, &prompt, max_tokens, None).await
 }
 
 fn mock_generate(prompt: &str, max_tokens: usize) -> GenerateResult {
@@ -86,6 +85,7 @@ async fn try_real_inference(
     state: &AppState,
     prompt: &str,
     max_tokens: usize,
+    emit: Option<&(dyn Fn(String) -> Result<()> + Send + Sync)>,
 ) -> Result<GenerateResult> {
     let start = Instant::now();
     let tok_path = state.default_tokenizer_path();
@@ -117,28 +117,44 @@ async fn try_real_inference(
 
     let mut generated_ids: Vec<i64> = Vec::new();
     let mut current_ids = input_ids.clone();
+    let mut cache: Option<Vec<(Vec<f32>, Vec<f32>)>> = None;
+    let mut emitted_text = String::new();
 
     for _ in 0..max_tokens {
         let seq_len = current_ids.len();
+        let past_len = cache
+            .as_ref()
+            .and_then(|layers| layers.first())
+            .map(|(key, _)| key.len() / (NUM_KV_HEADS * HEAD_DIM))
+            .unwrap_or(0);
         // Use tuple (shape, Vec) to avoid ndarray version mismatch with ort's private ndarray
         let input_ids_tensor = Tensor::from_array(([1, seq_len], current_ids.clone()))
             .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
-        let attention_mask_tensor = Tensor::from_array(([1, seq_len], vec![1i64; seq_len]))
-            .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
+        let attention_len = past_len + seq_len;
+        let attention_mask_tensor =
+            Tensor::from_array(([1, attention_len], vec![1i64; attention_len]))
+                .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
 
         let mut inputs: Vec<(String, SessionInputValue)> = vec![
             ("input_ids".to_string(), input_ids_tensor.into()),
             ("attention_mask".to_string(), attention_mask_tensor.into()),
         ];
         for layer in 0..NUM_LAYERS {
-            let empty_key =
-                Tensor::<f32>::from_array(([1, NUM_KV_HEADS, 0, HEAD_DIM], Vec::<f32>::new()))
+            let (key, value) = cache
+                .as_ref()
+                .map(|layers| layers[layer].clone())
+                .unwrap_or_default();
+            let key_tensor =
+                Tensor::<f32>::from_array(([1, NUM_KV_HEADS, past_len, HEAD_DIM], key))
                     .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
-            let empty_value =
-                Tensor::<f32>::from_array(([1, NUM_KV_HEADS, 0, HEAD_DIM], Vec::<f32>::new()))
+            let value_tensor =
+                Tensor::<f32>::from_array(([1, NUM_KV_HEADS, past_len, HEAD_DIM], value))
                     .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
-            inputs.push((format!("past_key_values.{layer}.key"), empty_key.into()));
-            inputs.push((format!("past_key_values.{layer}.value"), empty_value.into()));
+            inputs.push((format!("past_key_values.{layer}.key"), key_tensor.into()));
+            inputs.push((
+                format!("past_key_values.{layer}.value"),
+                value_tensor.into(),
+            ));
         }
 
         let outputs = session
@@ -161,13 +177,39 @@ async fn try_real_inference(
         let last_logits = &data[last_offset..last_offset + vocab];
         let next_id = argmax(last_logits) as i64;
 
+        let mut next_cache = Vec::with_capacity(NUM_LAYERS);
+        for layer in 0..NUM_LAYERS {
+            let (_, key) = outputs[format!("present.{layer}.key")]
+                .try_extract_tensor::<f32>()
+                .map_err(|e| anyhow::anyhow!("extract present key error: {e}"))?;
+            let (_, value) = outputs[format!("present.{layer}.value")]
+                .try_extract_tensor::<f32>()
+                .map_err(|e| anyhow::anyhow!("extract present value error: {e}"))?;
+            next_cache.push((key.to_vec(), value.to_vec()));
+        }
+        cache = Some(next_cache);
+
         // EOS token for Gemma is 1 (<eos>) or 106 (<end_of_turn>) - simple check
         if next_id == 1 || next_id == 106 {
             break;
         }
 
         generated_ids.push(next_id);
-        current_ids.push(next_id);
+        current_ids = vec![next_id];
+
+        if let Some(emit) = emit {
+            let decoded = tokenizer
+                .decode(&generated_ids, true)
+                .map_err(|e| anyhow::anyhow!("decode error: {e}"))?;
+            let delta = decoded
+                .strip_prefix(&emitted_text)
+                .unwrap_or(&decoded)
+                .to_string();
+            emitted_text = decoded;
+            if !delta.is_empty() {
+                emit(delta)?;
+            }
+        }
 
         if generated_ids.len() >= max_tokens {
             break;
@@ -215,21 +257,26 @@ pub async fn generate_stream(
     opts: GenerateOptions,
     emit: impl Fn(String) -> Result<()> + Send + Sync,
 ) -> Result<GenerateResult> {
-    // For now delegate to mock streaming to validate frontend pipeline
-    // Real streaming would emit per token inside the loop above
-    let res = generate_text(state, opts.clone()).await?;
-    if res.is_mock {
+    let max_tokens = opts.max_tokens.unwrap_or(32).min(512);
+    let model_path = state.default_model_path();
+    let tok_path = state.default_tokenizer_path();
+
+    if !model_path.exists() || !tok_path.exists() {
+        let res = mock_generate(&opts.prompt, max_tokens);
         // Simulate token-by-token emit
         for tok in res.text.split_whitespace() {
-            emit(tok.to_string())?;
+            emit(format!("{tok} "))?;
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-    } else {
-        for tok in res.text.split_whitespace() {
-            emit(tok.to_string())?;
-        }
+        return Ok(res);
     }
-    Ok(res)
+
+    let prompt = if opts.use_chat_template.unwrap_or(true) {
+        apply_gemma_chat_template(&opts.prompt)
+    } else {
+        opts.prompt.clone()
+    };
+    try_real_inference(state, &prompt, max_tokens, Some(&emit)).await
 }
 
 #[cfg(test)]

@@ -65,7 +65,7 @@ function formatBytes(b?: number) {
 
 export default function App() {
   const [prompt, setPrompt] = useState("こんにちは！Gemmaのオンデバイス推論について教えて。");
-  const [maxTokens, setMaxTokens] = useState(128);
+  const [maxTokens, setMaxTokens] = useState(32);
   const [temperature, setTemperature] = useState(0.7);
   const [useChatTemplate, setUseChatTemplate] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -395,7 +395,13 @@ export default function App() {
           {isStreaming && streamTokens.length > 0 && (
             <div className="stream-box">
               <div className="stream-label">streaming… {streamTokens.length} tokens</div>
-              <div className="stream-text">{streamTokens.join(" ")}</div>
+              <div className="stream-text">{streamTokens.join("")}</div>
+            </div>
+          )}
+
+          {isGenerating && (!isStreaming || streamTokens.length === 0) && (
+            <div className="hint">
+              {isStreaming ? "モデル準備中… 最初のトークンを待っています。" : "推論中… 完了後に結果を表示します。"}
             </div>
           )}
 
@@ -441,12 +447,12 @@ export default function App() {
           <li><code>bun install</code> — 依存取得</li>
           <li>画面の「モデルをダウンロード」または <code>bun run download:model</code> — Gemma 1B INT4 + tokenizer 取得</li>
           <li><code>bun run dev</code> — Viteのみ (ブラウザ確認)</li>
-          <li><code>bun run tauri dev</code> — Desktop推論 (Apple SiliconはCoreML GPUを自動使用)</li>
+          <li><code>bun run tauri dev</code> — Desktop推論 (Apple SiliconはCoreMLでGPU/CPUを併用)</li>
           <li><code>bun run tauri android dev</code> / <code>bun run tauri ios dev</code> — モバイル (要 NDK/Xcode, 並列検証)</li>
           <li><code>bun run tauri build</code> — バンドル / <code>bun run bench</code> — CLIベンチ</li>
         </ol>
         <div className="ep-matrix">
-          <strong>EP matrix:</strong> Win: CPU/DirectML/CUDA · Apple Silicon Mac: CoreML GPU (自動) · Intel Mac: CPU/CoreML · Linux: CPU/CUDA · Android: CPU/NNAPI/XNNPACK · iOS: CPU/CoreML
+          <strong>EP matrix:</strong> Win: CPU/DirectML/CUDA · Apple Silicon Mac: CoreML GPU + CPU fallback (自動) · Intel Mac: CPU/CoreML · Linux: CPU/CUDA · Android: CPU/NNAPI/XNNPACK · iOS: CPU/CoreML
         </div>
       </section>
 

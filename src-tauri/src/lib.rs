@@ -79,8 +79,8 @@ async fn generate_stream(
     };
 
     let result = inference::generate::generate_stream(&state, opts, |token| {
-        let _ = app.emit("token", token);
-        Ok(())
+        app.emit("token", token)
+            .map_err(|e| anyhow::anyhow!("failed to emit token: {e}"))
     })
     .await
     .map_err(|e| e.to_string())?;
