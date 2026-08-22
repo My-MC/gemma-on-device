@@ -26,12 +26,14 @@ fn variant_specs(variant: &str) -> Result<(Vec<FileSpec>, &'static str)> {
         "1b-int4" | "default" => Ok((
             vec![
                 FileSpec {
-                    url_path: "onnx/model_int4.onnx",
+                    url_path: "onnx/model_q4.onnx",
                     dest_name: "gemma-3-1b-it-int4.onnx",
                 },
+                // The ONNX graph references this external-data filename
+                // verbatim, so it must not be renamed after download.
                 FileSpec {
-                    url_path: "onnx/model_int4.onnx_data",
-                    dest_name: "gemma-3-1b-it-int4.onnx_data",
+                    url_path: "onnx/model_q4.onnx_data",
+                    dest_name: "model_q4.onnx_data",
                 },
                 FileSpec {
                     url_path: "tokenizer.json",
@@ -42,13 +44,10 @@ fn variant_specs(variant: &str) -> Result<(Vec<FileSpec>, &'static str)> {
         )),
         "1b-int8" => Ok((
             vec![
+                // model_int8.onnx is self-contained.
                 FileSpec {
                     url_path: "onnx/model_int8.onnx",
                     dest_name: "gemma-3-1b-it-int8.onnx",
-                },
-                FileSpec {
-                    url_path: "onnx/model_int8.onnx_data",
-                    dest_name: "gemma-3-1b-it-int8.onnx_data",
                 },
                 FileSpec {
                     url_path: "tokenizer.json",
@@ -57,19 +56,11 @@ fn variant_specs(variant: &str) -> Result<(Vec<FileSpec>, &'static str)> {
             ],
             "onnx-community/gemma-3-1b-it-ONNX",
         )),
-        "3n-e2b-int4" => Ok((
-            vec![
-                FileSpec {
-                    url_path: "onnx/model_int4.onnx",
-                    dest_name: "gemma-3n-E2B-it-int4.onnx",
-                },
-                FileSpec {
-                    url_path: "tokenizer.json",
-                    dest_name: "tokenizer.json",
-                },
-            ],
-            "onnx-community/gemma-3n-E2B-it-ONNX",
-        )),
+        "3n-e2b-int4" => anyhow::bail!(
+            "3n-e2b-int4 is not yet supported: the upstream repository uses a multi-component \
+             ONNX graph, while this app currently supports single-file models. Use 1b-int4 or \
+             1b-int8 instead."
+        ),
         _ => anyhow::bail!("unknown variant: {variant} (choose 1b-int4, 1b-int8, 3n-e2b-int4)"),
     }
 }
@@ -204,24 +195,6 @@ pub async fn download_model(
                 downloaded.push(dest.to_string_lossy().to_string());
             }
             Err(e) => {
-                // If onnx_data missing for 3n, allow fallback (not fatal)
-                let is_optional_data =
-                    spec.dest_name.contains("onnx_data") && variant.contains("3n");
-                if is_optional_data {
-                    eprintln!("[download] optional file missing {label}: {e:?}");
-                    let _ = app.emit(
-                        "download-progress",
-                        DownloadProgress {
-                            file: label.clone(),
-                            downloaded: 0,
-                            total: None,
-                            percent: Some(0.0),
-                            done: true,
-                            error: Some(format!("optional missing: {e}")),
-                        },
-                    );
-                    continue;
-                }
                 let _ = app.emit(
                     "download-progress",
                     DownloadProgress {
@@ -251,14 +224,39 @@ pub fn is_variant_ready(model_dir: &Path, variant: &str) -> bool {
         Ok(v) => v,
         Err(_) => return false,
     };
-    // Require at least onnx + tokenizer
-    for spec in specs
-        .iter()
-        .filter(|s| !s.dest_name.contains("onnx_data") || !variant.contains("3n"))
-    {
+    for spec in &specs {
         if !model_dir.join(spec.dest_name).exists() {
             return false;
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn int4_uses_the_upstream_external_data_name() {
+        let (specs, _) = variant_specs("1b-int4").unwrap();
+
+        assert_eq!(specs[0].url_path, "onnx/model_q4.onnx");
+        assert_eq!(specs[0].dest_name, "gemma-3-1b-it-int4.onnx");
+        assert_eq!(specs[1].url_path, "onnx/model_q4.onnx_data");
+        assert_eq!(specs[1].dest_name, "model_q4.onnx_data");
+    }
+
+    #[test]
+    fn int8_does_not_request_a_nonexistent_external_data_file() {
+        let (specs, _) = variant_specs("1b-int8").unwrap();
+
+        assert!(specs
+            .iter()
+            .all(|spec| !spec.url_path.ends_with("onnx_data")));
+    }
+
+    #[test]
+    fn unsupported_multi_component_3n_fails_before_downloading() {
+        assert!(variant_specs("3n-e2b-int4").is_err());
+    }
 }

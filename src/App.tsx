@@ -274,7 +274,7 @@ export default function App() {
               <select value={variant} onChange={(e) => setVariant(e.target.value)} disabled={downloading}>
                 <option value="1b-int4">1B INT4 (推奨, ~1.2GB, community ONNX)</option>
                 <option value="1b-int8">1B INT8 (~1.5GB)</option>
-                <option value="3n-e2b-int4">3n E2B INT4 (モバイル最適化, 実験的)</option>
+                <option value="3n-e2b-int4" disabled>3n E2B INT4 (現在未対応)</option>
               </select>
             </label>
             <button className="primary" onClick={handleDownload} disabled={downloading}>

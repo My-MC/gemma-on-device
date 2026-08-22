@@ -16,19 +16,18 @@ type Variant = "1b-int4" | "1b-int8" | "3n-e2b-int4";
 const VARIANTS: Record<Variant, { repo: string; files: string[]; desc: string }> = {
   "1b-int4": {
     repo: "onnx-community/gemma-3-1b-it-ONNX",
-    files: ["onnx/model_int4.onnx", "onnx/model_int4.onnx_data", "tokenizer.json", "tokenizer_config.json", "config.json"],
+    files: ["onnx/model_q4.onnx", "onnx/model_q4.onnx_data", "tokenizer.json", "tokenizer_config.json", "config.json"],
     desc: "Gemma 3 1B INT4 (Phase1, community ONNX)",
   },
   "1b-int8": {
     repo: "onnx-community/gemma-3-1b-it-ONNX",
-    files: ["onnx/model_int8.onnx", "onnx/model_int8.onnx_data", "tokenizer.json", "tokenizer_config.json", "config.json"],
+    files: ["onnx/model_int8.onnx", "tokenizer.json", "tokenizer_config.json", "config.json"],
     desc: "Gemma 3 1B INT8",
   },
   "3n-e2b-int4": {
     repo: "onnx-community/gemma-3n-E2B-it-ONNX",
-    // Note: 3n ONNX may not exist yet; fallback will try google/gemma-3n-E2B-it source
-    files: ["onnx/model_int4.onnx", "tokenizer.json", "tokenizer_config.json", "config.json"],
-    desc: "Gemma 3n E2B INT4 (Phase2, mobile optimized)",
+    files: [],
+    desc: "Gemma 3n E2B INT4 — not yet supported by the single-file loader",
   },
 };
 
@@ -57,6 +56,9 @@ async function main() {
   }
 
   const cfg = VARIANTS[variant];
+  if (variant === "3n-e2b-int4") {
+    throw new Error("3n-e2b-int4 is not yet supported; use 1b-int4 or 1b-int8");
+  }
   const token = process.env.HF_TOKEN || process.env.HUGGING_FACE_HUB_TOKEN;
   console.log(`\n[gemma-on-device] Download ${variant}: ${cfg.desc}`);
   console.log(`  repo: ${cfg.repo}`);
@@ -73,23 +75,17 @@ async function main() {
     const dest = `${outDir}/${destName}`;
     // Map model file to expected name for AppState
     let finalDest = dest;
-    if (destName === "model_int4.onnx") {
-      finalDest = `${outDir}/${variant.includes("3n") ? "gemma-3n-E2B-it-int4.onnx" : "gemma-3-1b-it-int4.onnx"}`;
+    if (destName === "model_q4.onnx") {
+      finalDest = `${outDir}/gemma-3-1b-it-int4.onnx`;
     }
     if (destName === "model_int8.onnx") {
       finalDest = `${outDir}/gemma-3-1b-it-int8.onnx`;
-    }
-    if (destName === "model_int4.onnx_data") {
-      finalDest = `${outDir}/${variant.includes("3n") ? "gemma-3n-E2B-it-int4.onnx_data" : "gemma-3-1b-it-int4.onnx_data"}`;
     }
     try {
       console.log(`  ↓ ${file} -> ${finalDest}`);
       await downloadFile(url, finalDest, token);
     } catch (e: any) {
       console.warn(`  ✗ ${file}: ${e.message}`);
-      if (file.includes("model_int4") && variant === "3n-e2b-int4") {
-        console.warn(`  Hint: 3n ONNX may not be available yet. Use --variant 1b-int4 or run: python scripts/export_onnx.py`);
-      }
     }
   }
 
