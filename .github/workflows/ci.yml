@@ -26,6 +26,13 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Build (tsc + vite)
         run: bun run build
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 7
 
   rust:
     name: rust (${{ matrix.os }})
@@ -53,3 +60,9 @@ jobs:
         run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
       - name: cargo fmt
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+      - name: Upload Cargo lock artifact (per-OS)
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-lock-${{ matrix.os }}
+          path: Cargo.lock
+          retention-days: 7
