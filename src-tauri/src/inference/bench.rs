@@ -46,11 +46,8 @@ pub async fn run_bench(state: &AppState, iterations: usize) -> anyhow::Result<Be
         is_mock = res.is_mock;
     }
 
-    let avg_latency = if iterations == 0 {
-        0.0
-    } else {
-        total_latency_ms / iterations as f64
-    };
+    // iterations > 0 is guaranteed by the early bail above
+    let avg_latency = total_latency_ms / iterations as f64;
     let avg_tps = if total_latency_ms > 0.0 {
         total_tokens as f64 / (total_latency_ms / 1000.0)
     } else {

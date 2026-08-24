@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use half::f16;
 use ort::value::Tensor;
 use rand::Rng;
@@ -216,10 +216,17 @@ async fn inner_generate(
         .inputs()
         .iter()
         .any(|i| i.name() == "attention_mask");
+    // Optimum Gemma exports often require position_ids even without past caching
+    let has_pos_ids = session
+        .session
+        .inputs()
+        .iter()
+        .any(|i| i.name() == "position_ids");
 
     let mut generated_ids: Vec<i64> = Vec::new();
     let mut current_ids = input_ids.clone();
     let mut full_text = String::new();
+    let mut interrupted: Option<String> = None;
 
     for _ in 0..max_tokens {
         let seq_len = current_ids.len();
@@ -227,8 +234,32 @@ async fn inner_generate(
             .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
         let mask_tensor = Tensor::from_array(([1, seq_len], vec![1i64; seq_len]))
             .map_err(|e| anyhow::anyhow!("mask tensor error: {e}"))?;
+        let pos_tensor = if has_pos_ids {
+            Some(
+                Tensor::from_array(([1, seq_len], (0..seq_len as i64).collect::<Vec<i64>>()))
+                    .map_err(|e| anyhow::anyhow!("position tensor error: {e}"))?,
+            )
+        } else {
+            None
+        };
 
-        let outputs = match if has_mask {
+        let outputs = match if let Some(pos_tensor) = pos_tensor {
+            if has_mask {
+                session
+                    .session
+                    .run(ort::inputs![
+                        "input_ids" => input_tensor,
+                        "attention_mask" => mask_tensor,
+                        "position_ids" => pos_tensor
+                    ])
+                    .map_err(|e| anyhow::anyhow!("ort run error (with mask + positions): {e}"))
+            } else {
+                session
+                    .session
+                    .run(ort::inputs!["input_ids" => input_tensor, "position_ids" => pos_tensor])
+                    .map_err(|e| anyhow::anyhow!("ort run error (with positions): {e}"))
+            }
+        } else if has_mask {
             session
                 .session
                 .run(ort::inputs!["input_ids" => input_tensor, "attention_mask" => mask_tensor])
@@ -363,7 +394,11 @@ async fn inner_generate(
                 .decode(&[next_id], true)
                 .unwrap_or_else(|_| next_id.to_string());
             full_text.push_str(&token_text);
-            emit_fn(token_text)?;
+            if let Err(e) = emit_fn(token_text) {
+                // Listener closed mid-stream: keep partial text instead of failing after emission
+                interrupted = Some(format!("stream interrupted: {e}"));
+                break;
+            }
         }
 
         if generated_ids.len() >= max_tokens {
@@ -371,23 +406,14 @@ async fn inner_generate(
         }
     }
 
+    // Decode failure must not error out after tokens were emitted; fall back to
+    // incrementally accumulated text (empty when emit was None)
     let text = if generated_ids.is_empty() {
         String::new()
-    } else if emit.is_some() {
-        if full_text.is_empty() {
-            tokenizer
-                .decode(&generated_ids, true)
-                .with_context(|| "decode generated ids")?
-        } else {
-            // Re-decode for final result to ensure correct detokenization
-            tokenizer
-                .decode(&generated_ids, true)
-                .unwrap_or_else(|_| full_text.clone())
-        }
     } else {
         tokenizer
             .decode(&generated_ids, true)
-            .with_context(|| "decode generated ids")?
+            .unwrap_or_else(|_| full_text.clone())
     };
 
     let latency_ms = start.elapsed().as_millis() as u64;
@@ -402,7 +428,7 @@ async fn inner_generate(
         tokens_per_sec,
         is_mock: false,
         model_id: "gemma-3-1b-it-INT4".to_string(),
-        error: None,
+        error: interrupted,
     })
 }
 

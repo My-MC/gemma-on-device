@@ -16,32 +16,71 @@ type Variant = "1b-int4" | "1b-int8" | "3n-e2b-int4";
 const VARIANTS: Record<Variant, { repo: string; files: string[]; desc: string }> = {
   "1b-int4": {
     repo: "onnx-community/gemma-3-1b-it-ONNX",
-    files: ["onnx/model_int4.onnx", "onnx/model_int4.onnx_data", "tokenizer.json", "tokenizer_config.json", "config.json"],
+    // INT4 build is published as q4 (no model_int4.* in the repo)
+    files: ["onnx/model_q4.onnx", "onnx/model_q4.onnx_data", "tokenizer.json"],
     desc: "Gemma 3 1B INT4 (Phase1, community ONNX)",
   },
   "1b-int8": {
     repo: "onnx-community/gemma-3-1b-it-ONNX",
-    files: ["onnx/model_int8.onnx", "onnx/model_int8.onnx_data", "tokenizer.json", "tokenizer_config.json", "config.json"],
+    // int8 is a single-file graph; there is no model_int8.onnx_data
+    files: ["onnx/model_int8.onnx", "tokenizer.json"],
     desc: "Gemma 3 1B INT8",
   },
   "3n-e2b-int4": {
     repo: "onnx-community/gemma-3n-E2B-it-ONNX",
-    // Note: 3n ONNX may not exist yet; fallback will try google/gemma-3n-E2B-it source
-    files: ["onnx/model_int4.onnx", "tokenizer.json", "tokenizer_config.json", "config.json"],
+    // Text-only inference needs the merged decoder (expects inputs_embeds)
+    files: ["onnx/decoder_model_merged_q4.onnx", "onnx/decoder_model_merged_q4.onnx_data", "tokenizer.json"],
     desc: "Gemma 3n E2B INT4 (Phase2, mobile optimized)",
   },
 };
 
-async function downloadFile(url: string, dest: string, token?: string) {
+// SHA256 from the HF API (lfs.oid); see models/README.md.
+// Download fails on mismatch — do not bypass before Session::commit_from_file.
+const SHA256: Record<string, string> = {
+  "onnx-community/gemma-3-1b-it-ONNX/onnx/model_q4.onnx": "69686023e5892376e38fcbcdd0c77af432c55b3bcd03aee6d561bd1f04507da0",
+  "onnx-community/gemma-3-1b-it-ONNX/onnx/model_q4.onnx_data": "c2370070be257a98d50e17d81be13e18304c39e7e6d9d1416f8f883681d2a17b",
+  "onnx-community/gemma-3-1b-it-ONNX/onnx/model_int8.onnx": "6d8ddeb9c637d43625df45933ad3a9e2337b8a027ab37a70dc230735ba285f5c",
+  "onnx-community/gemma-3-1b-it-ONNX/tokenizer.json": "55da1312bdf1d7d8fe8d9d1b3eed04086261149e6034e0ac3f8c633b67f5aac8",
+  "onnx-community/gemma-3n-E2B-it-ONNX/onnx/decoder_model_merged_q4.onnx": "4fcb3a37937db577756270c504851e9366ffa738ace6c5ee7d345728aa8dcbd0",
+  "onnx-community/gemma-3n-E2B-it-ONNX/onnx/decoder_model_merged_q4.onnx_data": "297a9301058969f1e67e42546a48875b4250f58b10a28249ff08d76e0b5ead57",
+  "onnx-community/gemma-3n-E2B-it-ONNX/tokenizer.json": "44cb3d7d545cf895311e004d9a2b2ce823be5eb84c9aa31f73858b607c44c924",
+};
+
+function destFor(repo: string, file: string, outDir: string): string | null {
+  const name = file.replace("onnx/", "");
+  if (name === "model_q4.onnx") return `${outDir}/gemma-3-1b-it-int4.onnx`;
+  if (name === "model_q4.onnx_data") return `${outDir}/gemma-3-1b-it-int4.onnx_data`;
+  if (name === "model_int8.onnx") return `${outDir}/gemma-3-1b-it-int8.onnx`;
+  if (repo.includes("3n") && name === "decoder_model_merged_q4.onnx") return `${outDir}/gemma-3n-E2B-it-int4.onnx`;
+  if (repo.includes("3n") && name === "decoder_model_merged_q4.onnx_data") return `${outDir}/gemma-3n-E2B-it-int4.onnx_data`;
+  if (name === "tokenizer.json") return `${outDir}/tokenizer.json`;
+  return null;
+}
+
+async function downloadFile(url: string, dest: string, expectedSha?: string, token?: string) {
   const headers: Record<string, string> = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(url, { headers });
-  if (!res.ok) {
+  if (!res.ok || !res.body) {
     throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText} - ${await res.text().catch(() => "")}`);
   }
-  const buf = await res.arrayBuffer();
-  await Bun.write(dest, buf);
-  console.log(`  ✓ ${dest} (${(buf.byteLength / 1024 / 1024).toFixed(1)} MB)`);
+  // Stream to disk (files are up to ~1.7GB) while hashing incrementally
+  const hasher = new Bun.CryptoHasher("sha256");
+  const writer = Bun.file(dest).writer();
+  let bytes = 0;
+  for await (const chunk of res.body) {
+    const buf = chunk as Uint8Array;
+    hasher.update(buf);
+    writer.write(buf);
+    bytes += buf.byteLength;
+  }
+  await writer.end();
+  const actualSha = hasher.digest("hex");
+  if (expectedSha && actualSha !== expectedSha) {
+    await Bun.$`rm -f ${dest}`.quiet();
+    throw new Error(`SHA256 mismatch for ${dest}: expected ${expectedSha}, got ${actualSha}`);
+  }
+  console.log(`  ✓ ${dest} (${(bytes / 1024 / 1024).toFixed(1)} MB, sha256 ✓)`);
 }
 
 async function main() {
@@ -68,27 +107,20 @@ async function main() {
   // For onnx-community, files are under main branch
   for (const file of cfg.files) {
     const url = `https://huggingface.co/${cfg.repo}/resolve/main/${file}`;
-    // Simplify dest: flatten onnx/ prefix
-    const destName = file.replace("onnx/", "");
-    const dest = `${outDir}/${destName}`;
-    // Map model file to expected name for AppState
-    let finalDest = dest;
-    if (destName === "model_int4.onnx") {
-      finalDest = `${outDir}/${variant.includes("3n") ? "gemma-3n-E2B-it-int4.onnx" : "gemma-3-1b-it-int4.onnx"}`;
+    const finalDest = destFor(cfg.repo, file, outDir);
+    if (!finalDest) {
+      console.warn(`  ✗ ${file}: no destination mapping, skipping`);
+      continue;
     }
-    if (destName === "model_int8.onnx") {
-      finalDest = `${outDir}/gemma-3-1b-it-int8.onnx`;
-    }
-    if (destName === "model_int4.onnx_data") {
-      finalDest = `${outDir}/${variant.includes("3n") ? "gemma-3n-E2B-it-int4.onnx_data" : "gemma-3-1b-it-int4.onnx_data"}`;
-    }
+    const expectedSha = SHA256[`${cfg.repo}/${file}`];
     try {
       console.log(`  ↓ ${file} -> ${finalDest}`);
-      await downloadFile(url, finalDest, token);
+      await downloadFile(url, finalDest, expectedSha, token);
     } catch (e: any) {
       console.warn(`  ✗ ${file}: ${e.message}`);
-      if (file.includes("model_int4") && variant === "3n-e2b-int4") {
-        console.warn(`  Hint: 3n ONNX may not be available yet. Use --variant 1b-int4 or run: python scripts/export_onnx.py`);
+      if (variant === "3n-e2b-int4" && file.includes("decoder_model_merged")) {
+        console.warn(`  Hint: verify the variant list in models/README.md or use --variant 1b-int4`);
+        process.exit(1);
       }
     }
   }

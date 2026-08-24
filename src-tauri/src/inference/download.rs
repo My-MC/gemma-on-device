@@ -25,59 +25,80 @@ struct FileSpec {
     expected_sha256: Option<&'static str>,
 }
 
+/// SHA256 hashes verified against the HF API (`lfs.oid`) and cross-checked by
+/// downloading `onnx/model_q4.onnx` locally. See models/README.md for details.
+const SHA_1B_TOKENIZER: &str = "55da1312bdf1d7d8fe8d9d1b3eed04086261149e6034e0ac3f8c633b67f5aac8";
+
 fn variant_specs(variant: &str) -> Result<(Vec<FileSpec>, &'static str)> {
     match variant {
+        // Repo has no model_int4.*; the INT4 build is published as q4 (MatMulNBits 4-bit)
         "1b-int4" | "default" => Ok((
             vec![
                 FileSpec {
-                    url_path: "onnx/model_int4.onnx",
+                    url_path: "onnx/model_q4.onnx",
                     dest_name: "gemma-3-1b-it-int4.onnx",
-                    expected_sha256: None,
+                    expected_sha256: Some(
+                        "69686023e5892376e38fcbcdd0c77af432c55b3bcd03aee6d561bd1f04507da0",
+                    ),
                 },
                 FileSpec {
-                    url_path: "onnx/model_int4.onnx_data",
+                    url_path: "onnx/model_q4.onnx_data",
                     dest_name: "gemma-3-1b-it-int4.onnx_data",
-                    expected_sha256: None,
+                    expected_sha256: Some(
+                        "c2370070be257a98d50e17d81be13e18304c39e7e6d9d1416f8f883681d2a17b",
+                    ),
                 },
                 FileSpec {
                     url_path: "tokenizer.json",
                     dest_name: "tokenizer.json",
-                    expected_sha256: None,
+                    expected_sha256: Some(SHA_1B_TOKENIZER),
                 },
             ],
             "onnx-community/gemma-3-1b-it-ONNX",
         )),
+        // int8 is a single-file graph; there is no model_int8.onnx_data in the repo
         "1b-int8" => Ok((
             vec![
                 FileSpec {
                     url_path: "onnx/model_int8.onnx",
                     dest_name: "gemma-3-1b-it-int8.onnx",
-                    expected_sha256: None,
-                },
-                FileSpec {
-                    url_path: "onnx/model_int8.onnx_data",
-                    dest_name: "gemma-3-1b-it-int8.onnx_data",
-                    expected_sha256: None,
+                    expected_sha256: Some(
+                        "6d8ddeb9c637d43625df45933ad3a9e2337b8a027ab37a70dc230735ba285f5c",
+                    ),
                 },
                 FileSpec {
                     url_path: "tokenizer.json",
                     dest_name: "tokenizer.json",
-                    expected_sha256: None,
+                    expected_sha256: Some(SHA_1B_TOKENIZER),
                 },
             ],
             "onnx-community/gemma-3-1b-it-ONNX",
         )),
+        // Gemma 3n splits into components; text-only inference needs the merged decoder.
+        // Note: decoder_model_merged expects inputs_embeds, so inference falls back to
+        // mock until embed_tokens chaining is implemented.
         "3n-e2b-int4" => Ok((
             vec![
                 FileSpec {
-                    url_path: "onnx/model_int4.onnx",
+                    url_path: "onnx/decoder_model_merged_q4.onnx",
                     dest_name: "gemma-3n-E2B-it-int4.onnx",
-                    expected_sha256: None,
+                    expected_sha256: Some(
+                        "4fcb3a37937db577756270c504851e9366ffa738ace6c5ee7d345728aa8dcbd0",
+                    ),
+                },
+                FileSpec {
+                    url_path: "onnx/decoder_model_merged_q4.onnx_data",
+                    dest_name: "gemma-3n-E2B-it-int4.onnx_data",
+                    expected_sha256: Some(
+                        "297a9301058969f1e67e42546a48875b4250f58b10a28249ff08d76e0b5ead57",
+                    ),
                 },
                 FileSpec {
                     url_path: "tokenizer.json",
                     dest_name: "tokenizer.json",
-                    expected_sha256: None,
+                    expected_sha256: Some(
+                        "44cb3d7d545cf895311e004d9a2b2ce823be5eb84c9aa31f73858b607c44c924",
+                    ),
                 },
             ],
             "onnx-community/gemma-3n-E2B-it-ONNX",
@@ -130,6 +151,28 @@ fn hf_token() -> Option<String> {
         .filter(|s| !s.trim().is_empty())
 }
 
+/// Remote file size via HEAD; None when unknown (network error, non-2xx, no header)
+async fn remote_content_length(client: &reqwest::Client, url: &str) -> Option<u64> {
+    let mut req = client.head(url);
+    if let Some(token) = hf_token() {
+        req = req.bearer_auth(token);
+    }
+    let resp = req.send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    resp.content_length().filter(|&n| n > 0)
+}
+
+fn build_client() -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .user_agent("gemma-on-device/1.0")
+        .read_timeout(Duration::from_secs(60))
+        .connect_timeout(Duration::from_secs(30))
+        .build()
+        .context("build reqwest client")
+}
+
 async fn download_one(
     app: &AppHandle,
     url: String,
@@ -144,6 +187,7 @@ async fn download_one(
     }
 
     let part = part_path(&dest);
+    let client = build_client()?;
 
     // If final dest already exists, verify and skip if valid
     if dest.exists() {
@@ -174,26 +218,32 @@ async fn download_one(
                 }
             }
         } else {
-            // No hash: validate via file size (non-empty) to detect truncated downloads
-            if let Ok(meta) = tokio::fs::metadata(&dest).await {
-                let len = meta.len();
-                if len == 0 {
-                    eprintln!("[download] existing {:?} is empty — re-downloading", dest);
-                    let _ = tokio::fs::remove_file(&dest).await;
-                } else {
-                    let total = Some(len);
+            // No expected hash: only trust the file when its size matches the remote
+            let local_len = tokio::fs::metadata(&dest)
+                .await
+                .map(|m| m.len())
+                .unwrap_or(0);
+            match remote_content_length(&client, &url).await {
+                Some(remote_len) if remote_len == local_len => {
                     let _ = app.emit(
                         "download-progress",
                         DownloadProgress {
                             file: file_label.clone(),
-                            downloaded: len,
-                            total,
+                            downloaded: local_len,
+                            total: Some(remote_len),
                             percent: Some(100.0),
                             done: true,
                             error: None,
                         },
                     );
                     return Ok(());
+                }
+                remote_len => {
+                    eprintln!(
+                        "[download] existing {:?} size {local_len} != remote {remote_len:?} — re-downloading",
+                        dest
+                    );
+                    let _ = tokio::fs::remove_file(&dest).await;
                 }
             }
         }
@@ -203,13 +253,6 @@ async fn download_one(
     if part.exists() {
         let _ = tokio::fs::remove_file(&part).await;
     }
-
-    let client = reqwest::Client::builder()
-        .user_agent("gemma-on-device/1.0")
-        .read_timeout(Duration::from_secs(60))
-        .connect_timeout(Duration::from_secs(30))
-        .build()
-        .context("build reqwest client")?;
 
     let mut attempt = 0;
     let max_attempts = 3;
