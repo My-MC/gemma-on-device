@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
@@ -22,6 +22,7 @@ type GenerateResult = {
   tokens_per_sec: number;
   is_mock: boolean;
   model_id: string;
+  error?: string;
 };
 
 type BenchResult = {
@@ -83,6 +84,19 @@ export default function App() {
   const [downloadProgress, setDownloadProgress] = useState<Record<string, DownloadProgress>>({});
   const [downloadComplete, setDownloadComplete] = useState<string[] | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const streamTokensRef = useRef<string[]>([]);
+
+  const finalizeResult = (payload: GenerateResult) => {
+    // Preserve partial streamed output when inference failed mid-generation
+    const partialText = streamTokensRef.current.join("");
+    const finalResult =
+      payload.error && !payload.text && partialText
+        ? { ...payload, text: partialText }
+        : payload;
+    setResult(finalResult);
+    setIsGenerating(false);
+    setIsStreaming(false);
+  };
 
   useEffect(() => {
     // Load system + model status
@@ -90,40 +104,64 @@ export default function App() {
     invoke<ModelInfo[]>("check_model_status").then(setModels).catch(() => {});
     invoke<string>("greet", { name: "Gemma" }).catch(() => {});
 
-    // Listen for streaming tokens
-    let unlistenToken: (() => void) | null = null;
-    let unlistenComplete: (() => void) | null = null;
-    let unlistenDlProgress: (() => void) | null = null;
-    let unlistenDlComplete: (() => void) | null = null;
+    const unlistenFns: (() => void)[] = [];
+    let cancelled = false;
 
-    listen<string>("token", (e) => {
-      setStreamTokens((prev) => [...prev, e.payload]);
-    }).then((f) => (unlistenToken = f));
-    listen<GenerateResult>("generation-complete", (e) => {
-      setResult(e.payload);
-      setIsGenerating(false);
-      setIsStreaming(false);
-    }).then((f) => (unlistenComplete = f));
-
-    listen<DownloadProgress>("download-progress", (e) => {
-      setDownloadProgress((prev) => ({ ...prev, [e.payload.file]: e.payload }));
-      if (e.payload.error) {
-        setDownloadError(e.payload.error);
+    const setup = async () => {
+      const u1 = await listen<string>("token", (e) => {
+        const next = [...streamTokensRef.current, e.payload];
+        streamTokensRef.current = next;
+        setStreamTokens(next);
+      });
+      if (cancelled) {
+        u1();
+        return;
       }
-    }).then((f) => (unlistenDlProgress = f));
+      unlistenFns.push(u1);
 
-    listen<string[]>("download-complete", (e) => {
-      setDownloadComplete(e.payload);
-      setDownloading(false);
-      // refresh model status
-      invoke<ModelInfo[]>("get_model_info").then(setModels).catch(() => {});
-    }).then((f) => (unlistenDlComplete = f));
+      const u2 = await listen<GenerateResult>("generation-complete", (e) => {
+        finalizeResult(e.payload);
+      });
+      if (cancelled) {
+        u2();
+        unlistenFns.forEach((fn) => fn());
+        return;
+      }
+      unlistenFns.push(u2);
+
+      const u3 = await listen<DownloadProgress>("download-progress", (e) => {
+        setDownloadProgress((prev) => ({ ...prev, [e.payload.file]: e.payload }));
+        if (e.payload.error) {
+          setDownloadError(e.payload.error);
+        }
+      });
+      if (cancelled) {
+        u3();
+        unlistenFns.forEach((fn) => fn());
+        return;
+      }
+      unlistenFns.push(u3);
+
+      const u4 = await listen<string[]>("download-complete", (e) => {
+        setDownloadComplete(e.payload);
+        setDownloading(false);
+        invoke<ModelInfo[]>("get_model_info").then(setModels).catch(() => {});
+      });
+      if (cancelled) {
+        u4();
+        unlistenFns.forEach((fn) => fn());
+        return;
+      }
+      unlistenFns.push(u4);
+    };
+    setup().catch((e) => {
+      console.error("listener setup failed", e);
+      unlistenFns.forEach((fn) => fn());
+    });
 
     return () => {
-      if (unlistenToken) unlistenToken();
-      if (unlistenComplete) unlistenComplete();
-      if (unlistenDlProgress) unlistenDlProgress();
-      if (unlistenDlComplete) unlistenDlComplete();
+      cancelled = true;
+      unlistenFns.forEach((fn) => fn());
     };
   }, []);
 
@@ -131,6 +169,7 @@ export default function App() {
     setError(null);
     setResult(null);
     setStreamTokens([]);
+    streamTokensRef.current = [];
     setIsGenerating(true);
     setIsStreaming(stream);
 
@@ -143,19 +182,13 @@ export default function App() {
 
     try {
       if (stream) {
-        // Rust will emit token events + generation-complete
         const res = await invoke<GenerateResult>("generate_stream", payload);
-        // In case events didn't fire (mock fallback), set result directly
-        if (res && !streamTokens.length) {
-          setResult(res);
-          setIsGenerating(false);
-          setIsStreaming(false);
+        if (res) {
+          finalizeResult(res);
         }
       } else {
         const res = await invoke<GenerateResult>("generate", payload);
-        setResult(res);
-        setIsGenerating(false);
-        setIsStreaming(false);
+        finalizeResult(res);
       }
     } catch (e: any) {
       setError(String(e));
@@ -394,7 +427,7 @@ export default function App() {
           {isStreaming && streamTokens.length > 0 && (
             <div className="stream-box">
               <div className="stream-label">streaming… {streamTokens.length} tokens</div>
-              <div className="stream-text">{streamTokens.join(" ")}</div>
+              <div className="stream-text">{streamTokens.join("")}</div>
             </div>
           )}
 
@@ -408,6 +441,7 @@ export default function App() {
                 </span>
               </div>
               <pre className="result-text">{result.text}</pre>
+              {result.error && <div className="error" style={{ marginTop: 8 }}>{result.error}</div>}
               <div className="result-meta">
                 <span className={`pill ${result.is_mock ? "warn" : "ok"}`}>{result.is_mock ? "mock pipeline" : "real inference"}</span>
                 {result.is_mock && <span className="muted">モデル配置で実推論に切替</span>}
