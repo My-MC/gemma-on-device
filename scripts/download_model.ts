@@ -84,10 +84,14 @@ async function downloadFile(url: string, dest: string, expectedSha?: string, tok
     let bytes = 0;
     for await (const chunk of res.body) {
       const buf = chunk as Uint8Array;
-      hasher.update(buf);
-      await writer.write(buf);
-      bytes += buf.byteLength;
+      // Got data: restart the idle window, then suspend it while a slow
+      // backpressured write drains so abort can't fire mid-write
       resetIdleTimer();
+      hasher.update(buf);
+      if (idleTimer) clearTimeout(idleTimer);
+      await writer.write(buf);
+      resetIdleTimer();
+      bytes += buf.byteLength;
     }
     await writer.end();
     const actualSha = hasher.digest("hex");
