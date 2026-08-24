@@ -29,15 +29,14 @@ pub struct InferenceSession {
     pub model_info: ModelInfo,
 }
 
-const APPLE_COREML: bool = cfg!(any(
-    target_os = "ios",
-    all(target_os = "macos", target_arch = "aarch64")
-));
+#[allow(dead_code)]
+const APPLE_SILICON_COREML: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
 
 /// Execution provider selected first for this build. Unsupported CoreML nodes
 /// continue on ONNX Runtime's CPU provider.
+#[allow(dead_code)]
 pub fn preferred_execution_provider() -> &'static str {
-    if APPLE_COREML || cfg!(feature = "coreml") {
+    if APPLE_SILICON_COREML || cfg!(feature = "coreml") {
         "CoreML (GPU + CPU fallback)"
     } else if cfg!(feature = "tensorrt") {
         "TensorRT"
@@ -123,33 +122,61 @@ impl AppState {
 pub fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Session> {
     let _ = ort::init().commit();
 
-    let builder = Session::builder().map_err(|e| anyhow::anyhow!("{}", e))?;
-    let builder = builder
+    let mut builder = Session::builder().map_err(|e| anyhow::anyhow!("{}", e))?;
+    builder = builder
         .with_optimization_level(GraphOptimizationLevel::Level3)
         .map_err(|e| anyhow::anyhow!("{}", e))?;
-    let builder = builder
-        .with_intra_threads(4)
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-    #[cfg(any(
-        feature = "coreml",
-        target_os = "ios",
-        all(target_os = "macos", target_arch = "aarch64")
-    ))]
+    // XNNPACK uses its own thread pool; ORT intra threads should be 1 to avoid contention
+    #[cfg(feature = "xnnpack")]
+    {
+        let xnn_threads = std::num::NonZeroUsize::new(
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4)
+                .clamp(1, 4),
+        )
+        .unwrap();
+        builder = builder
+            .with_intra_threads(1)
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        // Disable ORT spinning when XNNPACK is active (recommended)
+        if let Ok(b) = builder.with_intra_op_spinning(false) {
+            builder = b;
+        }
+        // XNNPACK provider will be configured below with xnn_threads
+        let _ = xnn_threads;
+    }
+    #[cfg(not(feature = "xnnpack"))]
+    {
+        let intra_threads = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4)
+            .clamp(1, 4);
+        builder = builder
+            .with_intra_threads(intra_threads)
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+    }
+
+    #[cfg(any(feature = "coreml", all(target_os = "macos", target_arch = "aarch64")))]
     let coreml_cache_dir = model_path
         .as_ref()
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join(".coreml-cache");
-    #[cfg(any(
-        feature = "coreml",
-        target_os = "ios",
-        all(target_os = "macos", target_arch = "aarch64")
-    ))]
+    #[cfg(any(feature = "coreml", all(target_os = "macos", target_arch = "aarch64")))]
     std::fs::create_dir_all(&coreml_cache_dir)?;
 
     // Execution providers are ordered by priority and unsupported nodes fall
     // back to CPU. Apple Silicon desktop builds enable CoreML automatically.
+    #[cfg(feature = "xnnpack")]
+    let xnn_threads = std::num::NonZeroUsize::new(
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4)
+            .clamp(1, 4),
+    )
+    .unwrap();
     let mut builder = builder
         .with_execution_providers([
             #[cfg(feature = "tensorrt")]
@@ -158,11 +185,7 @@ pub fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Session> {
             ort::ep::CUDA::default().build(),
             #[cfg(feature = "directml")]
             ort::ep::DirectML::default().build(),
-            #[cfg(any(
-                feature = "coreml",
-                target_os = "ios",
-                all(target_os = "macos", target_arch = "aarch64")
-            ))]
+            #[cfg(any(feature = "coreml", all(target_os = "macos", target_arch = "aarch64")))]
             {
                 let profile_compute_plan =
                     std::env::var("GEMMA_COREML_PROFILE").as_deref() == Ok("1");
@@ -176,6 +199,10 @@ pub fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Session> {
             },
             #[cfg(feature = "nnapi")]
             ort::ep::NNAPI::default().build(),
+            #[cfg(feature = "xnnpack")]
+            ort::ep::XNNPACK::default()
+                .with_intra_op_num_threads(xnn_threads)
+                .build(),
         ])
         .map_err(|e| anyhow::anyhow!("{}", e))?;
 

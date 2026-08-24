@@ -1,7 +1,7 @@
 mod inference;
 
 use inference::generate::{GenerateOptions, GenerateResult};
-use inference::session::{preferred_execution_provider, resolve_model_dir, AppState, ModelInfo};
+use inference::session::{resolve_model_dir, AppState, ModelInfo};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager, State};
 
@@ -17,7 +17,6 @@ pub struct SystemInfo {
     pub arch: String,
     pub tauri_version: String,
     pub ort_available: bool,
-    pub execution_provider: String,
     pub model_dir: String,
 }
 
@@ -28,7 +27,6 @@ async fn get_system_info(state: State<'_, AppState>) -> Result<SystemInfo, Strin
         arch: std::env::consts::ARCH.to_string(),
         tauri_version: "2".to_string(),
         ort_available: true,
-        execution_provider: preferred_execution_provider().to_string(),
         model_dir: state.model_dir.to_string_lossy().to_string(),
     })
 }
@@ -79,13 +77,17 @@ async fn generate_stream(
     };
 
     let result = inference::generate::generate_stream(&state, opts, |token| {
-        app.emit("token", token)
-            .map_err(|e| anyhow::anyhow!("failed to emit token: {e}"))
+        if let Err(e) = app.emit("token", token) {
+            eprintln!("[emit] token failed: {e}");
+        }
+        Ok(())
     })
     .await
     .map_err(|e| e.to_string())?;
 
-    let _ = app.emit("generation-complete", &result);
+    if let Err(e) = app.emit("generation-complete", &result) {
+        eprintln!("[emit] generation-complete failed: {e}");
+    }
     Ok(result)
 }
 
@@ -114,8 +116,7 @@ async fn download_model(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Ensure ort is initialized once at startup. Sessions register the
-    // platform-appropriate execution provider when a model is loaded.
+    // Ensure ort is initialized once at startup (CPU default)
     let _ = ort::init().commit();
 
     tauri::Builder::default()
@@ -145,21 +146,15 @@ pub fn run() {
 
 /// Resolve model dir considering mobile sandbox (app_data_dir) vs desktop dev (project models/)
 fn resolve_model_dir_for_app(app: &tauri::AppHandle) -> std::path::PathBuf {
-    // 1) Try app_data_dir (mobile + desktop installed)
     if let Ok(app_data) = app.path().app_data_dir() {
         let candidate = app_data.join("models");
-        // On desktop dev, if project `models/` exists, prefer it for easier CLI access (`bun run download:model`)
-        // On mobile, project `models` never exists, so app_data will be used.
         let project_models = resolve_model_dir();
         let use_project = project_models.exists() && cfg!(debug_assertions) && !is_mobile(app);
         if use_project {
-            // Ensure app_data candidate also exists for future migration
-            let _ = std::fs::create_dir_all(&candidate);
             return project_models;
         }
         return candidate;
     }
-    // Fallback to old resolver
     resolve_model_dir()
 }
 

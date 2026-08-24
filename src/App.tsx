@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
@@ -22,6 +22,7 @@ type GenerateResult = {
   tokens_per_sec: number;
   is_mock: boolean;
   model_id: string;
+  error?: string;
 };
 
 type BenchResult = {
@@ -42,7 +43,6 @@ type SystemInfo = {
   arch: string;
   tauri_version: string;
   ort_available: boolean;
-  execution_provider: string;
   model_dir: string;
 };
 
@@ -65,7 +65,7 @@ function formatBytes(b?: number) {
 
 export default function App() {
   const [prompt, setPrompt] = useState("こんにちは！Gemmaのオンデバイス推論について教えて。");
-  const [maxTokens, setMaxTokens] = useState(32);
+  const [maxTokens, setMaxTokens] = useState(128);
   const [temperature, setTemperature] = useState(0.7);
   const [useChatTemplate, setUseChatTemplate] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -84,6 +84,19 @@ export default function App() {
   const [downloadProgress, setDownloadProgress] = useState<Record<string, DownloadProgress>>({});
   const [downloadComplete, setDownloadComplete] = useState<string[] | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const streamTokensRef = useRef<string[]>([]);
+
+  const finalizeResult = (payload: GenerateResult) => {
+    // Preserve partial streamed output when inference failed mid-generation
+    const partialText = streamTokensRef.current.join("");
+    const finalResult =
+      payload.error && !payload.text && partialText
+        ? { ...payload, text: partialText }
+        : payload;
+    setResult(finalResult);
+    setIsGenerating(false);
+    setIsStreaming(false);
+  };
 
   useEffect(() => {
     // Load system + model status
@@ -91,47 +104,64 @@ export default function App() {
     invoke<ModelInfo[]>("check_model_status").then(setModels).catch(() => {});
     invoke<string>("greet", { name: "Gemma" }).catch(() => {});
 
-    // StrictMode may clean up this effect before async listener registration
-    // resolves. Immediately remove listeners that belong to a stale effect.
-    let disposed = false;
-    const unlisteners: Array<() => void> = [];
-    const retainListener = (registration: Promise<() => void>) => {
-      void registration.then((unlisten) => {
-        if (disposed) {
-          unlisten();
-        } else {
-          unlisteners.push(unlisten);
+    const unlistenFns: (() => void)[] = [];
+    let cancelled = false;
+
+    const setup = async () => {
+      const u1 = await listen<string>("token", (e) => {
+        const next = [...streamTokensRef.current, e.payload];
+        streamTokensRef.current = next;
+        setStreamTokens(next);
+      });
+      if (cancelled) {
+        u1();
+        return;
+      }
+      unlistenFns.push(u1);
+
+      const u2 = await listen<GenerateResult>("generation-complete", (e) => {
+        finalizeResult(e.payload);
+      });
+      if (cancelled) {
+        u2();
+        unlistenFns.forEach((fn) => fn());
+        return;
+      }
+      unlistenFns.push(u2);
+
+      const u3 = await listen<DownloadProgress>("download-progress", (e) => {
+        setDownloadProgress((prev) => ({ ...prev, [e.payload.file]: e.payload }));
+        if (e.payload.error) {
+          setDownloadError(e.payload.error);
         }
       });
-    };
-
-    retainListener(listen<string>("token", (e) => {
-      setStreamTokens((prev) => [...prev, e.payload]);
-    }));
-    retainListener(listen<GenerateResult>("generation-complete", (e) => {
-      setResult(e.payload);
-      setIsGenerating(false);
-      setIsStreaming(false);
-    }));
-
-    retainListener(listen<DownloadProgress>("download-progress", (e) => {
-      setDownloadProgress((prev) => ({ ...prev, [e.payload.file]: e.payload }));
-      if (e.payload.error) {
-        setDownloadError(e.payload.error);
+      if (cancelled) {
+        u3();
+        unlistenFns.forEach((fn) => fn());
+        return;
       }
-    }));
+      unlistenFns.push(u3);
 
-    retainListener(listen<string[]>("download-complete", (e) => {
-      setDownloadComplete(e.payload);
-      setDownloading(false);
-      // refresh model status
-      invoke<ModelInfo[]>("get_model_info").then(setModels).catch(() => {});
-    }));
+      const u4 = await listen<string[]>("download-complete", (e) => {
+        setDownloadComplete(e.payload);
+        setDownloading(false);
+        invoke<ModelInfo[]>("get_model_info").then(setModels).catch(() => {});
+      });
+      if (cancelled) {
+        u4();
+        unlistenFns.forEach((fn) => fn());
+        return;
+      }
+      unlistenFns.push(u4);
+    };
+    setup().catch((e) => {
+      console.error("listener setup failed", e);
+      unlistenFns.forEach((fn) => fn());
+    });
 
     return () => {
-      disposed = true;
-      unlisteners.forEach((unlisten) => unlisten());
-      unlisteners.length = 0;
+      cancelled = true;
+      unlistenFns.forEach((fn) => fn());
     };
   }, []);
 
@@ -139,6 +169,7 @@ export default function App() {
     setError(null);
     setResult(null);
     setStreamTokens([]);
+    streamTokensRef.current = [];
     setIsGenerating(true);
     setIsStreaming(stream);
 
@@ -151,19 +182,13 @@ export default function App() {
 
     try {
       if (stream) {
-        // Rust will emit token events + generation-complete
         const res = await invoke<GenerateResult>("generate_stream", payload);
-        // In case events didn't fire (mock fallback), set result directly
-        if (res && !streamTokens.length) {
-          setResult(res);
-          setIsGenerating(false);
-          setIsStreaming(false);
+        if (res) {
+          finalizeResult(res);
         }
       } else {
         const res = await invoke<GenerateResult>("generate", payload);
-        setResult(res);
-        setIsGenerating(false);
-        setIsStreaming(false);
+        finalizeResult(res);
       }
     } catch (e: any) {
       setError(String(e));
@@ -247,7 +272,7 @@ export default function App() {
             <div><strong>Platform</strong> {system.platform}/{system.arch}</div>
             <div><strong>Model dir</strong> <code>{system.model_dir}</code></div>
             <div><strong>Tauri</strong> {system.tauri_version}</div>
-            <div><strong>ort</strong> {system.ort_available ? `available · ${system.execution_provider}` : "unavailable"}</div>
+            <div><strong>ort</strong> {system.ort_available ? "available (CPU default, EPs via features)" : "unavailable"}</div>
           </div>
         </section>
       )}
@@ -281,7 +306,7 @@ export default function App() {
               <select value={variant} onChange={(e) => setVariant(e.target.value)} disabled={downloading}>
                 <option value="1b-int4">1B INT4 (推奨, ~1.2GB, community ONNX)</option>
                 <option value="1b-int8">1B INT8 (~1.5GB)</option>
-                <option value="3n-e2b-int4" disabled>3n E2B INT4 (現在未対応)</option>
+                <option value="3n-e2b-int4">3n E2B INT4 (モバイル最適化, 実験的)</option>
               </select>
             </label>
             <button className="primary" onClick={handleDownload} disabled={downloading}>
@@ -401,14 +426,8 @@ export default function App() {
 
           {isStreaming && streamTokens.length > 0 && (
             <div className="stream-box">
-              <div className="stream-label">streaming… {streamTokens.length} updates</div>
+              <div className="stream-label">streaming… {streamTokens.length} tokens</div>
               <div className="stream-text">{streamTokens.join("")}</div>
-            </div>
-          )}
-
-          {isGenerating && (!isStreaming || streamTokens.length === 0) && (
-            <div className="hint">
-              {isStreaming ? "モデル準備中… 最初のトークンを待っています。" : "推論中… 完了後に結果を表示します。"}
             </div>
           )}
 
@@ -422,6 +441,7 @@ export default function App() {
                 </span>
               </div>
               <pre className="result-text">{result.text}</pre>
+              {result.error && <div className="error" style={{ marginTop: 8 }}>{result.error}</div>}
               <div className="result-meta">
                 <span className={`pill ${result.is_mock ? "warn" : "ok"}`}>{result.is_mock ? "mock pipeline" : "real inference"}</span>
                 {result.is_mock && <span className="muted">モデル配置で実推論に切替</span>}
@@ -454,12 +474,12 @@ export default function App() {
           <li><code>bun install</code> — 依存取得</li>
           <li>画面の「モデルをダウンロード」または <code>bun run download:model</code> — Gemma 1B INT4 + tokenizer 取得</li>
           <li><code>bun run dev</code> — Viteのみ (ブラウザ確認)</li>
-          <li><code>bun run tauri dev</code> — Desktop推論 (Apple SiliconはCoreMLでGPU/CPUを併用)</li>
+          <li><code>bun run tauri dev</code> — Desktop推論</li>
           <li><code>bun run tauri android dev</code> / <code>bun run tauri ios dev</code> — モバイル (要 NDK/Xcode, 並列検証)</li>
           <li><code>bun run tauri build</code> — バンドル / <code>bun run bench</code> — CLIベンチ</li>
         </ol>
         <div className="ep-matrix">
-          <strong>EP matrix:</strong> Win: CPU/DirectML/CUDA · Apple Silicon Mac: CoreML GPU + CPU fallback (自動) · Intel Mac: CPU/CoreML · Linux: CPU/CUDA · Android: CPU/NNAPI/XNNPACK · iOS: CPU/CoreML
+          <strong>EP matrix (ort features):</strong> Win: CPU/DirectML/CUDA · Mac: CPU/CoreML · Linux: CPU/CUDA · Android: CPU/NNAPI/XNNPACK · iOS: CPU/CoreML
         </div>
       </section>
 

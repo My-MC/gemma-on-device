@@ -62,6 +62,7 @@ pub fn mock_tokenize(text: &str) -> Vec<i64> {
         .collect()
 }
 
+#[allow(dead_code)]
 pub fn mock_detokenize(ids: &[i64]) -> String {
     format!("[mock detokenize: {} tokens]", ids.len())
 }
