@@ -32,7 +32,7 @@ async function main() {
   // Check model files
   const files = [
     "models/gemma-3-1b-it-int4.onnx",
-    "models/gemma-3-1b-it-int4.onnx_data",
+    "models/model_q4.onnx_data",
     "models/tokenizer.json",
     "models/gemma-3n-E2B-it-int4.onnx",
   ];

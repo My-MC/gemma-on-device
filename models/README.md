@@ -5,8 +5,8 @@ Gemma ONNX models for `ort` validation.
 ## Expected files (AppState)
 
 App expects:
-- `models/gemma-3-1b-it-int4.onnx` (+ optional `.onnx_data`) — Phase1
-- `models/gemma-3n-E2B-it-int4.onnx` — Phase2
+- `models/gemma-3-1b-it-int4.onnx` (+ `models/model_q4.onnx_data` kept literal) — Phase1
+- `models/gemma-3n-E2B-it-int4.onnx` (+ `models/decoder_model_merged_q4.onnx_data` literal) — Phase2
 - `models/tokenizer.json` — shared (SentencePiece)
 
 Missing files → app runs in **MOCK mode** (UI pipeline validation without 1GB download).
@@ -40,7 +40,7 @@ python scripts/export_onnx.py --model google/gemma-3-1b-it --out models --quant 
 Download from Hugging Face:
 - https://huggingface.co/onnx-community/gemma-3-1b-it-ONNX
   - `onnx/model_q4.onnx` → `models/gemma-3-1b-it-int4.onnx`
-  - `onnx/model_q4.onnx_data` → `models/gemma-3-1b-it-int4.onnx_data`
+  - `onnx/model_q4.onnx_data` → `models/model_q4.onnx_data` (kept literal for ONNX external_data, see `download.rs`)
   - `tokenizer.json` → `models/tokenizer.json`
 
 ## Size
@@ -55,17 +55,17 @@ Every model file is verified after download via SHA256 before `Session::commit_f
 
 ```bash
 sha256sum models/gemma-3-1b-it-int4.onnx
-sha256sum models/gemma-3-1b-it-int4.onnx_data
+sha256sum models/model_q4.onnx_data
 sha256sum models/tokenizer.json
 ```
 
 | File | Size | SHA256 | Variant | Source |
 | --- | --- | --- | --- | --- |
 | `gemma-3-1b-it-int4.onnx` | 347,363 B | `69686023e5892376e38fcbcdd0c77af432c55b3bcd03aee6d561bd1f04507da0` | 1b-int4 | `onnx-community/gemma-3-1b-it-ONNX:onnx/model_q4.onnx` |
-| `gemma-3-1b-it-int4.onnx_data` | 859,106,816 B | `c2370070be257a98d50e17d81be13e18304c39e7e6d9d1416f8f883681d2a17b` | 1b-int4 | `onnx-community/gemma-3-1b-it-ONNX:onnx/model_q4.onnx_data` |
+| `model_q4.onnx_data` | 859,106,816 B | `c2370070be257a98d50e17d81be13e18304c39e7e6d9d1416f8f883681d2a17b` | 1b-int4 | `onnx-community/gemma-3-1b-it-ONNX:onnx/model_q4.onnx_data` |
 | `gemma-3-1b-it-int8.onnx` | 1,001,481,982 B | `6d8ddeb9c637d43625df45933ad3a9e2337b8a027ab37a70dc230735ba285f5c` | 1b-int8 | `onnx-community/gemma-3-1b-it-ONNX:onnx/model_int8.onnx` |
 | `gemma-3n-E2B-it-int4.onnx` | 1,686,685 B | `4fcb3a37937db577756270c504851e9366ffa738ace6c5ee7d345728aa8dcbd0` | 3n-e2b-int4 | `onnx-community/gemma-3n-E2B-it-ONNX:onnx/decoder_model_merged_q4.onnx` |
-| `gemma-3n-E2B-it-int4.onnx_data` | 1,620,499,456 B | `297a9301058969f1e67e42546a48875b4250f58b10a28249ff08d76e0b5ead57` | 3n-e2b-int4 | `onnx-community/gemma-3n-E2B-it-ONNX:onnx/decoder_model_merged_q4.onnx_data` |
+| `decoder_model_merged_q4.onnx_data` | 1,620,499,456 B | `297a9301058969f1e67e42546a48875b4250f58b10a28249ff08d76e0b5ead57` | 3n-e2b-int4 | `onnx-community/gemma-3n-E2B-it-ONNX:onnx/decoder_model_merged_q4.onnx_data` |
 | `tokenizer.json` | 20,323,013 B | `55da1312bdf1d7d8fe8d9d1b3eed04086261149e6034e0ac3f8c633b67f5aac8` | 1b-* | `onnx-community/gemma-3-1b-it-ONNX:tokenizer.json` |
 | `tokenizer.json` | 20,366,294 B | `44cb3d7d545cf895311e004d9a2b2ce823be5eb84c9aa31f73858b607c44c924` | 3n-e2b-int4 | `onnx-community/gemma-3n-E2B-it-ONNX:tokenizer.json` |
 

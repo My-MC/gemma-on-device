@@ -72,8 +72,8 @@ CI will enforce the same gates (`.github/workflows` upcoming). A PR with failing
 
 - `models/` is `.gitignore`d. **Never commit** `*.onnx`, `*.onnx_data`, `*.safetensors`.
 - Expected files (see `models/README.md`):
-  - `gemma-3-1b-it-int4.onnx` (+ `gemma-3-1b-it-int4.onnx_data`) + `tokenizer.json`
-  - `gemma-3n-E2B-it-int4.onnx` + `tokenizer.json`
+  - `gemma-3-1b-it-int4.onnx` (+ `model_q4.onnx_data` kept literal for external_data) + `tokenizer.json`
+  - `gemma-3n-E2B-it-int4.onnx` (+ `decoder_model_merged_q4.onnx_data` literal) + `tokenizer.json`
 - Downloads are performed via:
   - UI: Tauri command `download_model { variant }` in `src-tauri/src/inference/download.rs` (streams with `reqwest` + `rustls-tls`, emits `download-progress` / `download-complete` to `src/App.tsx`)
   - CLI: `bun run download:model` (`scripts/download_model.ts`)
