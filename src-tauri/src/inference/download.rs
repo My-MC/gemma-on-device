@@ -41,9 +41,11 @@ fn variant_specs(variant: &str) -> Result<(Vec<FileSpec>, &'static str)> {
                         "69686023e5892376e38fcbcdd0c77af432c55b3bcd03aee6d561bd1f04507da0",
                     ),
                 },
+                // Keep upstream filename verbatim: the .onnx's external_data
+                // location is the literal "model_q4.onnx_data" (see PR #5).
                 FileSpec {
                     url_path: "onnx/model_q4.onnx_data",
-                    dest_name: "gemma-3-1b-it-int4.onnx_data",
+                    dest_name: "model_q4.onnx_data",
                     expected_sha256: Some(
                         "c2370070be257a98d50e17d81be13e18304c39e7e6d9d1416f8f883681d2a17b",
                     ),
@@ -86,9 +88,10 @@ fn variant_specs(variant: &str) -> Result<(Vec<FileSpec>, &'static str)> {
                         "4fcb3a37937db577756270c504851e9366ffa738ace6c5ee7d345728aa8dcbd0",
                     ),
                 },
+                // Keep literal for external_data (see 1b-int4 above).
                 FileSpec {
                     url_path: "onnx/decoder_model_merged_q4.onnx_data",
-                    dest_name: "gemma-3n-E2B-it-int4.onnx_data",
+                    dest_name: "decoder_model_merged_q4.onnx_data",
                     expected_sha256: Some(
                         "297a9301058969f1e67e42546a48875b4250f58b10a28249ff08d76e0b5ead57",
                     ),

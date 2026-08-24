@@ -49,10 +49,11 @@ const SHA256: Record<string, string> = {
 function destFor(repo: string, file: string, outDir: string): string | null {
   const name = file.replace("onnx/", "");
   if (name === "model_q4.onnx") return `${outDir}/gemma-3-1b-it-int4.onnx`;
-  if (name === "model_q4.onnx_data") return `${outDir}/gemma-3-1b-it-int4.onnx_data`;
+  // Keep literal for external_data (see download.rs).
+  if (name === "model_q4.onnx_data") return `${outDir}/model_q4.onnx_data`;
   if (name === "model_int8.onnx") return `${outDir}/gemma-3-1b-it-int8.onnx`;
   if (repo.includes("3n") && name === "decoder_model_merged_q4.onnx") return `${outDir}/gemma-3n-E2B-it-int4.onnx`;
-  if (repo.includes("3n") && name === "decoder_model_merged_q4.onnx_data") return `${outDir}/gemma-3n-E2B-it-int4.onnx_data`;
+  if (repo.includes("3n") && name === "decoder_model_merged_q4.onnx_data") return `${outDir}/decoder_model_merged_q4.onnx_data`;
   if (name === "tokenizer.json") return `${outDir}/tokenizer.json`;
   return null;
 }
