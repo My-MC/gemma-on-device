@@ -1,0 +1,28 @@
+version: 2
+updates:
+  # GitHub Actions — keeps actions/checkout, oven-sh/setup-bun, dtolnay/rust-toolchain, Swatinem/rust-cache etc. up to date
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+  # Bun — package.json / bun.lock (React, Vite, Tauri CLI, TypeScript etc.)
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "javascript"
+
+  # Cargo — Cargo.lock / src-tauri/Cargo.toml (ort, tokenizers, tauri, tokio etc.)
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "rust"
