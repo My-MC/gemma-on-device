@@ -29,6 +29,28 @@ pub struct InferenceSession {
     pub model_info: ModelInfo,
 }
 
+#[allow(dead_code)]
+const APPLE_SILICON_COREML: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
+
+/// Execution provider selected first for this build. Unsupported CoreML nodes
+/// continue on ONNX Runtime's CPU provider.
+#[allow(dead_code)]
+pub fn preferred_execution_provider() -> &'static str {
+    if APPLE_SILICON_COREML || cfg!(feature = "coreml") {
+        "CoreML (GPU + CPU fallback)"
+    } else if cfg!(feature = "tensorrt") {
+        "TensorRT"
+    } else if cfg!(feature = "cuda") {
+        "CUDA"
+    } else if cfg!(feature = "directml") {
+        "DirectML"
+    } else if cfg!(feature = "nnapi") {
+        "NNAPI"
+    } else {
+        "CPU"
+    }
+}
+
 impl AppState {
     pub fn new(model_dir: PathBuf) -> Self {
         Self {
@@ -136,8 +158,17 @@ pub fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Session> {
             .map_err(|e| anyhow::anyhow!("{}", e))?;
     }
 
-    // Execution Providers ordered by priority - falls back to CPU
-    // Enabled via Cargo features per target platform
+    #[cfg(any(feature = "coreml", all(target_os = "macos", target_arch = "aarch64")))]
+    let coreml_cache_dir = model_path
+        .as_ref()
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(".coreml-cache");
+    #[cfg(any(feature = "coreml", all(target_os = "macos", target_arch = "aarch64")))]
+    std::fs::create_dir_all(&coreml_cache_dir)?;
+
+    // Execution providers are ordered by priority and unsupported nodes fall
+    // back to CPU. Apple Silicon desktop builds enable CoreML automatically.
     #[cfg(feature = "xnnpack")]
     let xnn_threads = std::num::NonZeroUsize::new(
         std::thread::available_parallelism()
@@ -154,8 +185,18 @@ pub fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Session> {
             ort::ep::CUDA::default().build(),
             #[cfg(feature = "directml")]
             ort::ep::DirectML::default().build(),
-            #[cfg(feature = "coreml")]
-            ort::ep::CoreML::default().build(),
+            #[cfg(any(feature = "coreml", all(target_os = "macos", target_arch = "aarch64")))]
+            {
+                let profile_compute_plan =
+                    std::env::var("GEMMA_COREML_PROFILE").as_deref() == Ok("1");
+                ort::ep::CoreML::default()
+                    .with_compute_units(ort::ep::coreml::ComputeUnits::CPUAndGPU)
+                    .with_model_format(ort::ep::coreml::ModelFormat::MLProgram)
+                    .with_low_precision_accumulation_on_gpu(true)
+                    .with_model_cache_dir(coreml_cache_dir.to_string_lossy())
+                    .with_profile_compute_plan(profile_compute_plan)
+                    .build()
+            },
             #[cfg(feature = "nnapi")]
             ort::ep::NNAPI::default().build(),
             #[cfg(feature = "xnnpack")]
@@ -191,4 +232,24 @@ pub fn resolve_model_dir() -> PathBuf {
     }
     // Default to project models dir (will be created on demand)
     PathBuf::from("models")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn apple_silicon_build_includes_coreml() {
+        use ort::ep::ExecutionProvider;
+
+        assert_eq!(
+            preferred_execution_provider(),
+            "CoreML (GPU + CPU fallback)"
+        );
+        assert!(
+            ort::ep::CoreML::default().is_available().unwrap(),
+            "the linked ONNX Runtime binary does not include CoreML"
+        );
+    }
 }

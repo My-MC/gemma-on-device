@@ -207,6 +207,16 @@ bun run tauri build           # Tauri bundle (src-tauri/target/release/bundle)
 bun run tauri build -- --features cuda
 ```
 
+On Apple Silicon Macs, `bun run tauri dev` and `bun run tauri build` include
+CoreML automatically. Inference requests CoreML's `CPUAndGPU` compute mode,
+uses MLProgram with FP16 GPU accumulation, and falls back to CPU for graph nodes
+that CoreML cannot execute. The community Gemma ONNX graph contains dynamic
+operations, so current profiling shows partial GPU offload rather than
+GPU-exclusive execution. Compiled CoreML graphs
+are cached in `models/.coreml-cache/` (or the app data model directory).
+Set `GEMMA_COREML_PROFILE=1` when launching the app to log CoreML's per-operator
+hardware assignment and estimated execution time for GPU diagnostics.
+
 Thresholds: desktop 5 tok/s / mobile 2 tok/s (INT4).
 
 ## Mobile
@@ -235,7 +245,8 @@ bun run tauri ios dev
 Execution providers in `src-tauri/Cargo.toml:31`:
 
 - Win: `directml` / `cuda` / `tensorrt`
-- Mac: `coreml` / `cuda`
+- Apple Silicon Mac: `coreml` is enabled automatically (GPU + CPU fallback)
+- Intel Mac: `coreml` (explicit Cargo feature)
 - Linux: `cuda`
 - Android: `nnapi` / `xnnpack`
 - iOS: `coreml`
