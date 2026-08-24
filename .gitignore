@@ -13,3 +13,5 @@ models/*
 bun.lockb
 .DS_Store
 *.deb
+# Tauri generated platform projects (re-create with `tauri ios init` / `tauri android init`)
+src-tauri/gen/
