@@ -60,27 +60,34 @@ function destFor(repo: string, file: string, outDir: string): string | null {
 async function downloadFile(url: string, dest: string, expectedSha?: string, token?: string) {
   const headers: Record<string, string> = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(url, { headers });
-  if (!res.ok || !res.body) {
-    throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText} - ${await res.text().catch(() => "")}`);
+  // Stream to a temp .part file first; only rename over dest after hash validation
+  const part = `${dest}.part`;
+  try {
+    const res = await fetch(url, { headers });
+    if (!res.ok || !res.body) {
+      throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText} - ${await res.text().catch(() => "")}`);
+    }
+    // Stream to disk (files are up to ~1.7GB) while hashing incrementally
+    const hasher = new Bun.CryptoHasher("sha256");
+    const writer = Bun.file(part).writer();
+    let bytes = 0;
+    for await (const chunk of res.body) {
+      const buf = chunk as Uint8Array;
+      hasher.update(buf);
+      await writer.write(buf);
+      bytes += buf.byteLength;
+    }
+    await writer.end();
+    const actualSha = hasher.digest("hex");
+    if (expectedSha && actualSha !== expectedSha) {
+      throw new Error(`SHA256 mismatch for ${dest}: expected ${expectedSha}, got ${actualSha}`);
+    }
+    await Bun.$`mv ${part} ${dest}`.quiet();
+    console.log(`  ✓ ${dest} (${(bytes / 1024 / 1024).toFixed(1)} MB, sha256 ✓)`);
+  } catch (e) {
+    await Bun.$`rm -f ${part}`.quiet();
+    throw e;
   }
-  // Stream to disk (files are up to ~1.7GB) while hashing incrementally
-  const hasher = new Bun.CryptoHasher("sha256");
-  const writer = Bun.file(dest).writer();
-  let bytes = 0;
-  for await (const chunk of res.body) {
-    const buf = chunk as Uint8Array;
-    hasher.update(buf);
-    writer.write(buf);
-    bytes += buf.byteLength;
-  }
-  await writer.end();
-  const actualSha = hasher.digest("hex");
-  if (expectedSha && actualSha !== expectedSha) {
-    await Bun.$`rm -f ${dest}`.quiet();
-    throw new Error(`SHA256 mismatch for ${dest}: expected ${expectedSha}, got ${actualSha}`);
-  }
-  console.log(`  ✓ ${dest} (${(bytes / 1024 / 1024).toFixed(1)} MB, sha256 ✓)`);
 }
 
 async function main() {
@@ -117,11 +124,11 @@ async function main() {
       console.log(`  ↓ ${file} -> ${finalDest}`);
       await downloadFile(url, finalDest, expectedSha, token);
     } catch (e: any) {
-      console.warn(`  ✗ ${file}: ${e.message}`);
+      console.error(`  ✗ ${file}: ${e.message}`);
       if (variant === "3n-e2b-int4" && file.includes("decoder_model_merged")) {
-        console.warn(`  Hint: verify the variant list in models/README.md or use --variant 1b-int4`);
-        process.exit(1);
+        console.error(`  Hint: verify the variant list in models/README.md or use --variant 1b-int4`);
       }
+      process.exit(1);
     }
   }
 

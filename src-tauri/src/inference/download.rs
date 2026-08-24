@@ -436,10 +436,7 @@ pub fn is_variant_ready(model_dir: &Path, variant: &str) -> bool {
         Ok(v) => v,
         Err(_) => return false,
     };
-    for spec in specs
-        .iter()
-        .filter(|s| !s.dest_name.contains("onnx_data") || !variant.contains("3n"))
-    {
+    for spec in specs.iter() {
         if !model_dir.join(spec.dest_name).exists() {
             return false;
         }

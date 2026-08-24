@@ -173,7 +173,7 @@ export default function App() {
     try {
       if (stream) {
         const res = await invoke<GenerateResult>("generate_stream", payload);
-        if (res && !streamTokensRef.current.length) {
+        if (res) {
           setResult(res);
           setIsGenerating(false);
           setIsStreaming(false);
