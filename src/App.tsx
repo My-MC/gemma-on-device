@@ -86,6 +86,18 @@ export default function App() {
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const streamTokensRef = useRef<string[]>([]);
 
+  const finalizeResult = (payload: GenerateResult) => {
+    // Preserve partial streamed output when inference failed mid-generation
+    const partialText = streamTokensRef.current.join("");
+    const finalResult =
+      payload.error && !payload.text && partialText
+        ? { ...payload, text: partialText }
+        : payload;
+    setResult(finalResult);
+    setIsGenerating(false);
+    setIsStreaming(false);
+  };
+
   useEffect(() => {
     // Load system + model status
     invoke<SystemInfo>("get_system_info").then(setSystem).catch(() => setSystem(null));
@@ -108,9 +120,7 @@ export default function App() {
       unlistenFns.push(u1);
 
       const u2 = await listen<GenerateResult>("generation-complete", (e) => {
-        setResult(e.payload);
-        setIsGenerating(false);
-        setIsStreaming(false);
+        finalizeResult(e.payload);
       });
       if (cancelled) {
         u2();
@@ -174,15 +184,11 @@ export default function App() {
       if (stream) {
         const res = await invoke<GenerateResult>("generate_stream", payload);
         if (res) {
-          setResult(res);
-          setIsGenerating(false);
-          setIsStreaming(false);
+          finalizeResult(res);
         }
       } else {
         const res = await invoke<GenerateResult>("generate", payload);
-        setResult(res);
-        setIsGenerating(false);
-        setIsStreaming(false);
+        finalizeResult(res);
       }
     } catch (e: any) {
       setError(String(e));

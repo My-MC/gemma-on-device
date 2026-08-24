@@ -62,8 +62,19 @@ async function downloadFile(url: string, dest: string, expectedSha?: string, tok
   if (token) headers["Authorization"] = `Bearer ${token}`;
   // Stream to a temp .part file first; only rename over dest after hash validation
   const part = `${dest}.part`;
+  const IDLE_TIMEOUT_MS = 60_000;
+  const controller = new AbortController();
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  const resetIdleTimer = () => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(
+      () => controller.abort(new Error(`stalled transfer: no data for ${IDLE_TIMEOUT_MS / 1000}s`)),
+      IDLE_TIMEOUT_MS,
+    );
+  };
   try {
-    const res = await fetch(url, { headers });
+    resetIdleTimer();
+    const res = await fetch(url, { headers, signal: controller.signal });
     if (!res.ok || !res.body) {
       throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText} - ${await res.text().catch(() => "")}`);
     }
@@ -76,6 +87,7 @@ async function downloadFile(url: string, dest: string, expectedSha?: string, tok
       hasher.update(buf);
       await writer.write(buf);
       bytes += buf.byteLength;
+      resetIdleTimer();
     }
     await writer.end();
     const actualSha = hasher.digest("hex");
@@ -87,6 +99,8 @@ async function downloadFile(url: string, dest: string, expectedSha?: string, tok
   } catch (e) {
     await Bun.$`rm -f ${part}`.quiet();
     throw e;
+  } finally {
+    if (idleTimer) clearTimeout(idleTimer);
   }
 }
 
