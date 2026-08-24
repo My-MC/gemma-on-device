@@ -156,7 +156,6 @@ pub fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Session> {
             .map_err(|e| anyhow::anyhow!("{}", e))?;
     }
 
-<<<<<<< HEAD
     #[cfg(any(feature = "coreml", all(target_os = "macos", target_arch = "aarch64")))]
     let coreml_cache_dir = model_path
         .as_ref()
@@ -168,6 +167,14 @@ pub fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Session> {
 
     // Execution providers are ordered by priority and unsupported nodes fall
     // back to CPU. Apple Silicon desktop builds enable CoreML automatically.
+    #[cfg(feature = "xnnpack")]
+    let xnn_threads = std::num::NonZeroUsize::new(
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4)
+            .clamp(1, 4),
+    )
+    .unwrap();
     let mut builder = builder
         .with_execution_providers([
             #[cfg(feature = "tensorrt")]
