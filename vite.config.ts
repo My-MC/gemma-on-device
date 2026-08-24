@@ -29,4 +29,11 @@ export default defineConfig(async () => ({
       ignored: ["**/src-tauri/**"],
     },
   },
+  build: {
+    outDir: "dist",
+  },
+  preview: {
+    port: 1420,
+    strictPort: true,
+  },
 }));

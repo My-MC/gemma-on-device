@@ -5,9 +5,13 @@ dist
 dist-ssr
 *.local
 .env
-models/
+models/*
+!models/README.md
 *.onnx
 *.onnx_data
+!models/.gitkeep
 bun.lockb
 .DS_Store
 *.deb
+# Tauri generated platform projects (re-create with `tauri ios init` / `tauri android init`)
+src-tauri/gen/

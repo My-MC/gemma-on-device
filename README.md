@@ -171,8 +171,8 @@ bun scripts/download_model.ts --variant 1b-int4 --out models
 **Manual**:
 
 - https://huggingface.co/onnx-community/gemma-3-1b-it-ONNX
-  - `onnx/model_int4.onnx` → `models/gemma-3-1b-it-int4.onnx`
-  - `onnx/model_int4.onnx_data` → `models/gemma-3-1b-it-int4.onnx_data`
+  - `onnx/model_q4.onnx` → `models/gemma-3-1b-it-int4.onnx`
+  - `onnx/model_q4.onnx_data` → `models/model_q4.onnx_data` (kept literal for ONNX external_data)
   - `tokenizer.json` → `models/tokenizer.json`
 
 Verify manually after download:

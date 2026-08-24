@@ -120,14 +120,43 @@ impl AppState {
 pub fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Session> {
     let _ = ort::init().commit();
 
-    let builder = Session::builder().map_err(|e| anyhow::anyhow!("{}", e))?;
-    let builder = builder
+    let mut builder = Session::builder().map_err(|e| anyhow::anyhow!("{}", e))?;
+    builder = builder
         .with_optimization_level(GraphOptimizationLevel::Level3)
         .map_err(|e| anyhow::anyhow!("{}", e))?;
-    let builder = builder
-        .with_intra_threads(4)
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
 
+    // XNNPACK uses its own thread pool; ORT intra threads should be 1 to avoid contention
+    #[cfg(feature = "xnnpack")]
+    {
+        let xnn_threads = std::num::NonZeroUsize::new(
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4)
+                .clamp(1, 4),
+        )
+        .unwrap();
+        builder = builder
+            .with_intra_threads(1)
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        // Disable ORT spinning when XNNPACK is active (recommended)
+        if let Ok(b) = builder.with_intra_op_spinning(false) {
+            builder = b;
+        }
+        // XNNPACK provider will be configured below with xnn_threads
+        let _ = xnn_threads;
+    }
+    #[cfg(not(feature = "xnnpack"))]
+    {
+        let intra_threads = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4)
+            .clamp(1, 4);
+        builder = builder
+            .with_intra_threads(intra_threads)
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+    }
+
+<<<<<<< HEAD
     #[cfg(any(feature = "coreml", all(target_os = "macos", target_arch = "aarch64")))]
     let coreml_cache_dir = model_path
         .as_ref()
@@ -161,6 +190,10 @@ pub fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Session> {
             },
             #[cfg(feature = "nnapi")]
             ort::ep::NNAPI::default().build(),
+            #[cfg(feature = "xnnpack")]
+            ort::ep::XNNPACK::default()
+                .with_intra_op_num_threads(xnn_threads)
+                .build(),
         ])
         .map_err(|e| anyhow::anyhow!("{}", e))?;
 
