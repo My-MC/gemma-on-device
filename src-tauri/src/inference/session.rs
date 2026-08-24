@@ -29,10 +29,12 @@ pub struct InferenceSession {
     pub model_info: ModelInfo,
 }
 
+#[allow(dead_code)]
 const APPLE_SILICON_COREML: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
 
 /// Execution provider selected first for this build. Unsupported CoreML nodes
 /// continue on ONNX Runtime's CPU provider.
+#[allow(dead_code)]
 pub fn preferred_execution_provider() -> &'static str {
     if APPLE_SILICON_COREML || cfg!(feature = "coreml") {
         "CoreML (GPU + CPU fallback)"
