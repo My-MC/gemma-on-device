@@ -26,13 +26,25 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Build (tsc + vite)
         run: bun run build
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 7
 
   rust:
-    name: rust (check / clippy / fmt)
-    runs-on: ubuntu-latest
+    name: rust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - name: Install Tauri system dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
@@ -48,3 +60,18 @@ jobs:
         run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
       - name: cargo fmt
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+      - name: cargo build (release) — Linux/macOS
+        if: runner.os != 'Windows'
+        run: cargo build --manifest-path src-tauri/Cargo.toml --release
+      - name: cargo build (release) — Windows (dynamic ONNX Runtime to avoid CRT mismatch)
+        if: runner.os == 'Windows'
+        # ort's static CRT (MD) vs esaxx/onig's MT causes LNK2038 on Windows.
+        # Context7 /ort docs: `load-dynamic` disables linking (`disable-linking`), avoids static CRT.
+        run: cargo build --manifest-path src-tauri/Cargo.toml --release --features load-dynamic
+      - name: Upload Rust release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-release-${{ matrix.os }}
+          path: src-tauri/target/release/
+          retention-days: 7
+          if-no-files-found: warn

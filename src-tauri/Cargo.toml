@@ -45,6 +45,8 @@ coreml = ["ort/coreml"]
 directml = ["ort/directml"]
 nnapi = ["ort/nnapi"]
 xnnpack = ["ort/xnnpack"]
+# Dynamic loading of ONNX Runtime (avoids static linking, fixes Windows CRT mismatch)
+load-dynamic = ["ort/load-dynamic"]
 
 # Apple Silicon desktop builds include CoreML automatically. The explicit
 # `coreml` feature remains available for iOS and other Apple targets.
