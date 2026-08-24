@@ -60,9 +60,11 @@ jobs:
         run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
       - name: cargo fmt
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-      - name: Upload Cargo lock artifact (per-OS)
+      - name: cargo build (release)
+        run: cargo build --manifest-path src-tauri/Cargo.toml --release
+      - name: Upload Rust release artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cargo-lock-${{ matrix.os }}
-          path: Cargo.lock
+          name: rust-release-${{ matrix.os }}
+          path: src-tauri/target/release/
           retention-days: 7
