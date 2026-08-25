@@ -88,3 +88,15 @@ To rotate a hash, update this table and `variant_specs` in the same PR and inclu
 ## Git
 
 `models/` is `.gitignored`. Do not commit `.onnx` files.
+
+## Models in Git worktrees
+
+Because `models/` is `.gitignored`, every Git worktree gets its own empty `models/` directory. If you work across multiple branches, choose one of these approaches:
+
+1. **Download per worktree.** Run `bun run download:model` inside each worktree. Each copy is SHA256-verified before it is accepted.
+
+2. **Symlink `models/` to a shared directory outside any worktree.** For example, store one copy in `~/shared-gemma-models` and symlink `models/` in each worktree to that path. Keep the shared directory outside your repository trees so Git does not track it.
+
+3. **Use `app_data_dir` for mobile.** On Android and iOS, `resolve_model_dir_for_app` stores models in the app sandbox (`app_data_dir/models`), so no worktree duplication happens there.
+
+SHA256 verification applies no matter which option you use. Corrupted or mismatched files are deleted and re-downloaded.

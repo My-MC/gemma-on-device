@@ -302,6 +302,18 @@ This project follows **GitHub Flow**. See `CONTRIBUTING.md` for the full workflo
 - Keep commits atomic. Each commit touching `src-tauri/` must pass the quality gates locally before commit.
 - Open a PR via `gh pr create` for every branch (Conventional prefix `feat:` / `fix:` / `chore:` / `docs:`). CI must be green before merge. Merge only via GitHub PR (Squash or Merge).
 
+### Git Worktrees
+
+Each worktree is an isolated working directory, so dependencies and build artifacts are not shared with other worktrees. Run `bun install` inside each worktree and let `src-tauri/target/` build independently. Create sibling worktrees from `master` with the normal `git worktree add` workflow.
+
+Parallel worktrees must avoid port collisions. Set `VITE_PORT`, `VITE_HMR_PORT`, and `VITE_PREVIEW_PORT` to values that do not overlap with other worktrees or the default `1420` / `1421` ports. `vite.config.ts` reads all three variables.
+
+For Tauri desktop dev in a worktree, use `scripts/worktree-dev.ts`. It reads `VITE_PORT`, writes a temporary JSON Merge Patch to `src-tauri/tauri.worktree.conf.json` that overrides only `build.devUrl`, and runs `tauri dev --config src-tauri/tauri.worktree.conf.json`. The generated patch file is gitignored, so do not commit it.
+
+Models live in each worktree's own `models/` directory. You can download per worktree with `bun run download:model`, or save disk space by symlinking `models/` to a shared external directory that already holds the verified ONNX files and `tokenizer.json`. Only symlink a directory you trust, because every worktree re-verifies hashes before loading.
+
+Mobile generated directories under `src-tauri/gen/` are also per-worktree. After creating a worktree, regenerate mobile projects with `bun run tauri ios init` or `bun run tauri android init` before running `bun run tauri ios dev` or `bun run tauri android dev`.
+
 ### Per-Task Quality Gates (Mandatory)
 
 After every task (feature, fix, refactor, docs touching `src-tauri/`), run in order:
