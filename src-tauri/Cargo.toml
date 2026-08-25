@@ -28,7 +28,7 @@ tokio-util = { version = "0.7", features = ["io"] }
 # ONNX Runtime wrapper - CPU default, EPs enabled via features
 ort = { version = "2.0.0-rc.13", features = ["half"] }
 # Tokenizer for Gemma (SentencePiece)
-tokenizers = { version = "0.22", features = [] }
+tokenizers = { version = "0.23", features = [] }
 ndarray = "0.17"
 sha2 = "0.10"
 hex = "0.4"
