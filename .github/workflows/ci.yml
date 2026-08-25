@@ -27,7 +27,7 @@ jobs:
       - name: Build (tsc + vite)
         run: bun run build
       - name: Upload frontend artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: frontend-dist
           path: dist
@@ -69,7 +69,7 @@ jobs:
         # Context7 /ort docs: `load-dynamic` disables linking (`disable-linking`), avoids static CRT.
         run: cargo build --manifest-path src-tauri/Cargo.toml --release --features load-dynamic
       - name: Upload Rust release artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rust-release-${{ matrix.os }}
           path: target/release/
