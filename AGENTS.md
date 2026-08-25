@@ -54,6 +54,14 @@ cargo build --manifest-path src-tauri/Cargo.toml
 - **Docs**: Update `AGENTS.md` / `CONTRIBUTING.md` / `README.md` when workflow, quality gates, or model handling changes.
 - See `CONTRIBUTING.md` for full contributor workflow including SHA256 model verification.
 
+## Git Worktrees
+
+Agents may work in a Git worktree. Each worktree is an isolated working directory, so dependencies and build artifacts are not shared with the main worktree or other worktrees.
+
+- Run `bun install` in the active worktree. `node_modules/` is not shared across worktrees.
+- Rust build artifacts under `src-tauri/target/` are per-worktree. Do not reuse or assume a shared `target/` directory.
+- When running dev servers, respect `VITE_PORT` and `VITE_HMR_PORT` if they are set. The default Vite port is `1420`, but parallel worktrees must avoid collisions by honoring the environment variables.
+
 ## Coding Conventions
 
 - **Comments**: Keep concise. Do not write long-form thinking in code comments.

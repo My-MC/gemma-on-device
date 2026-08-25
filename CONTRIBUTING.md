@@ -47,6 +47,53 @@ bun run tauri dev          # Desktop (see README for WSL flags)
 
 Every distinct task from the prioritized backlog (see `AGENTS.md` explore report) gets its own branch and PR. Do not bundle unrelated fixes (e.g., DL atomicity and xnnpack) into one PR.
 
+### Working with Git worktrees
+
+Use a sibling worktree when you want to keep a review branch, experiment, or second task checked out alongside your active branch. Each worktree has its own working directory, `node_modules`, and Rust `target/`, so dependencies and build artifacts stay isolated.
+
+Create a sibling worktree from `master`:
+
+```bash
+git worktree add -b feat/x ../gemma-on-device-feat-x master
+cd ../gemma-on-device-feat-x
+```
+
+Install dependencies inside the new worktree:
+
+```bash
+bun install
+```
+
+Rust builds are isolated per worktree because `src-tauri/target/` lives inside each working directory. Run quality gates in each worktree independently:
+
+```bash
+cargo check --manifest-path src-tauri/Cargo.toml
+```
+
+For Vite-only development, avoid port collisions with the original worktree by overriding the dev and HMR ports:
+
+```bash
+VITE_PORT=1422 VITE_HMR_PORT=1423 bun run dev
+```
+
+For Tauri development, use the helper that writes a JSON Merge Patch override for `build.devUrl` and launches `tauri dev`:
+
+```bash
+VITE_PORT=1422 bun run scripts/worktree-dev.ts
+```
+
+If `VITE_PORT` is omitted, the helper defaults to `1420`.
+
+Each worktree has its own `models/` directory. Download or copy models into that worktree's `models/` folder, or point to a shared external model directory if your platform supports it. Do not commit model files.
+
+When you are finished with the worktree, remove it:
+
+```bash
+git worktree remove ../gemma-on-device-feat-x
+```
+
+This removes only the working directory; the branch itself remains until you delete it manually. This workflow is an addition to GitHub Flow, not a replacement, so still open a PR from the worktree branch and merge via GitHub.
+
 ## Per-Task Quality Gates (Mandatory)
 
 Run these **in order after every task** (feature, fix, refactor, docs that touches `src-tauri/`) and ensure they pass before committing or opening a PR. Do not batch at the end of a multi-task session.
