@@ -26,16 +26,10 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Build (tsc + vite)
         run: bun run build
-      - name: Upload frontend artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: frontend-dist
-          path: dist
-          if-no-files-found: error
-          retention-days: 7
 
-  rust:
-    name: rust (${{ matrix.os }})
+  build:
+    name: build (${{ matrix.os }})
+    needs: frontend
     strategy:
       fail-fast: false
       matrix:
@@ -51,6 +45,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
@@ -60,18 +59,22 @@ jobs:
         run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
       - name: cargo fmt
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-      - name: cargo build (release) — Linux/macOS
+      - name: Build Tauri bundle — Linux/macOS
         if: runner.os != 'Windows'
-        run: cargo build --manifest-path src-tauri/Cargo.toml --release
-      - name: cargo build (release) — Windows (dynamic ONNX Runtime to avoid CRT mismatch)
+        run: bun run tauri build
+        env:
+          CI: true
+      - name: Build Tauri bundle — Windows (dynamic ONNX Runtime to avoid CRT mismatch)
         if: runner.os == 'Windows'
         # ort's static CRT (MD) vs esaxx/onig's MT causes LNK2038 on Windows.
         # Context7 /ort docs: `load-dynamic` disables linking (`disable-linking`), avoids static CRT.
-        run: cargo build --manifest-path src-tauri/Cargo.toml --release --features load-dynamic
-      - name: Upload Rust release artifact
+        run: bun run tauri build -- --features load-dynamic
+        env:
+          CI: true
+      - name: Upload Tauri bundle artifact
         uses: actions/upload-artifact@v7
         with:
-          name: rust-release-${{ matrix.os }}
-          path: target/release/
+          name: gemma-on-device-${{ matrix.os }}
+          path: src-tauri/target/release/bundle
           retention-days: 7
           if-no-files-found: error
