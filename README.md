@@ -229,9 +229,11 @@ must be present at runtime or `ort::init()` fails.
 Resolution order used by `src-tauri/src/lib.rs:init_ort()`:
 
 1. `ORT_DYLIB_PATH` env var (explicit override, also picked up by `ort`).
-2. `<exe-dir>/onnxruntime.dll` — where CI drops it via
-   `.github/workflows/ci.yml` (`Stage onnxruntime.dll for Windows bundle`) and
-   where `tauri.conf.json` `bundle.resources` places it for installed bundles.
+2. `<exe-dir>/onnxruntime.dll` — where CI stages it via
+   `.github/workflows/ci.yml` and where the Windows-only
+   `src-tauri/tauri.windows.conf.json` `bundle.resources` places it in installed
+   bundles. Non-Windows builds need no DLL (`ort` links statically and no
+   resource mapping exists outside Windows).
 3. `ort::init()` fallback (lets `ort` use its own DLL search rules).
 
 For a manual Windows desktop build, place the matching DLL next to the binary

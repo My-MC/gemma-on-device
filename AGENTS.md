@@ -78,6 +78,7 @@ Agents may work in a Git worktree. Each worktree is an isolated working director
 - `src-tauri/capabilities/default.json` is `core:default` + `opener:default` and allows custom commands (`generate`, `download_model`, etc.).
 - `src-tauri/src/inference/download.rs` streams via `reqwest` (`rustls-tls`) and emits `app.emit("download-progress")` / `emit("download-complete")`, listened to in `src/App.tsx`. Downloads are verified via SHA256 (`models/README.md`, see `CONTRIBUTING.md`).
 - **SHA256**: Every model file (`*.onnx`, `*.onnx_data`, `tokenizer.json`) must be SHA256-verified after download. Expected hashes live in `models/README.md`. Verification is mandatory before `Session::commit_from_file`.
+- **ORT DLL**: Windows-only concern — `src-tauri/tauri.windows.conf.json` owns the `bundle.resources` entry; `scripts/download_ort_dll.ts` stages a SHA256-verified copy (auto-run by `beforeBuildCommand`). Linux/macOS builds require no DLL.
 
 ## Context7 / Context-Mode (Mandatory)
 
