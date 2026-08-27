@@ -75,6 +75,8 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: gemma-on-device-${{ matrix.os }}
-          path: src-tauri/target/release/bundle
+          # `tauri build` emits bundles to the workspace-root `target/`, not `src-tauri/target/`
+          # (the workspace is declared in the root `Cargo.toml`).
+          path: target/release/bundle
           retention-days: 7
           if-no-files-found: error
