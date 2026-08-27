@@ -179,8 +179,16 @@ fn init_ort() {
         }
 
         if let Some(path) = candidates.into_iter().find(|p| p.exists()) {
-            match ort::init_from(path.clone()).and_then(|b| b.commit()) {
-                Ok(_) => return,
+            match ort::init_from(path.clone()) {
+                Ok(builder) => {
+                    if builder.commit() {
+                        return;
+                    }
+                    eprintln!(
+                        "[ort] init_from({}) loaded but commit() returned false.",
+                        path.display()
+                    );
+                }
                 Err(e) => eprintln!(
                     "[ort] init_from({}) failed: {e}. Falling back to default init.",
                     path.display()
