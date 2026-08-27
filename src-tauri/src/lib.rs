@@ -161,25 +161,31 @@ pub fn run() {
 ///    is enough when the DLL is on `PATH` or in the working directory).
 #[cfg(target_os = "windows")]
 fn init_ort() {
-    use std::path::PathBuf;
+    // `ort::init_from` only exists when the `load-dynamic` feature is on;
+    // without it `ort` is statically linked (or fails at link time) and
+    // `ort::init()` is the only init entry point.
+    #[cfg(feature = "load-dynamic")]
+    {
+        use std::path::PathBuf;
 
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Ok(p) = std::env::var("ORT_DYLIB_PATH") {
-        candidates.push(PathBuf::from(p));
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            candidates.push(dir.join("onnxruntime.dll"));
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        if let Ok(p) = std::env::var("ORT_DYLIB_PATH") {
+            candidates.push(PathBuf::from(p));
         }
-    }
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                candidates.push(dir.join("onnxruntime.dll"));
+            }
+        }
 
-    if let Some(path) = candidates.into_iter().find(|p| p.exists()) {
-        match ort::init_from(path.clone()).and_then(|b| b.commit()) {
-            Ok(_) => return,
-            Err(e) => eprintln!(
-                "[ort] init_from({}) failed: {e}. Falling back to default init.",
-                path.display()
-            ),
+        if let Some(path) = candidates.into_iter().find(|p| p.exists()) {
+            match ort::init_from(path.clone()).and_then(|b| b.commit()) {
+                Ok(_) => return,
+                Err(e) => eprintln!(
+                    "[ort] init_from({}) failed: {e}. Falling back to default init.",
+                    path.display()
+                ),
+            }
         }
     }
     let _ = ort::init().commit();
