@@ -11,6 +11,7 @@
     "download:model": "bun scripts/download_model.ts",
     "download:model:1b": "bun scripts/download_model.ts --variant 1b-int4",
     "download:model:3n": "bun scripts/download_model.ts --variant 3n-e2b-int4",
+    "download:ort-dll": "bun scripts/download_ort_dll.ts",
     "export:onnx": "python3 scripts/export_onnx.py",
     "bench": "bun scripts/bench.ts",
     "check:ort": "bun scripts/check_ort.ts"

@@ -26,16 +26,10 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Build (tsc + vite)
         run: bun run build
-      - name: Upload frontend artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: frontend-dist
-          path: dist
-          if-no-files-found: error
-          retention-days: 7
 
-  rust:
-    name: rust (${{ matrix.os }})
+  build:
+    name: build (${{ matrix.os }})
+    needs: frontend
     strategy:
       fail-fast: false
       matrix:
@@ -51,6 +45,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+      # `tauri.conf.json` `bundle.resources` references
+      # `../target/release/onnxruntime.dll`, and Tauri's build script fails if
+      # that path is missing. Stage it now (placeholder on non-Windows, real
+      # DLL on Windows) so `cargo check`/`clippy` and the Tauri build all see
+      # the file.
+      - name: Stage onnxruntime.dll for build script
+        run: bun run download:ort-dll
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
@@ -60,18 +66,31 @@ jobs:
         run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
       - name: cargo fmt
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-      - name: cargo build (release) — Linux/macOS
+      - name: Build Tauri bundle — Linux/macOS
         if: runner.os != 'Windows'
-        run: cargo build --manifest-path src-tauri/Cargo.toml --release
-      - name: cargo build (release) — Windows (dynamic ONNX Runtime to avoid CRT mismatch)
+        run: bun run tauri build
+        env:
+          CI: true
+      # `load-dynamic` does not link or vendor `onnxruntime.dll`; without it the
+      # installed bundle fails to init ort at runtime. Re-stage right before
+      # `tauri build` so the installer ships the pinned version. All downloads
+      # go through scripts/download_ort_dll.ts (SHA256-verified before save).
+      - name: Stage onnxruntime.dll for Windows bundle
+        if: runner.os == 'Windows'
+        run: bun scripts/download_ort_dll.ts --force
+      - name: Build Tauri bundle — Windows (dynamic ONNX Runtime to avoid CRT mismatch)
         if: runner.os == 'Windows'
         # ort's static CRT (MD) vs esaxx/onig's MT causes LNK2038 on Windows.
         # Context7 /ort docs: `load-dynamic` disables linking (`disable-linking`), avoids static CRT.
-        run: cargo build --manifest-path src-tauri/Cargo.toml --release --features load-dynamic
-      - name: Upload Rust release artifact
+        run: bun run tauri build -- --features load-dynamic
+        env:
+          CI: true
+      - name: Upload Tauri bundle artifact
         uses: actions/upload-artifact@v7
         with:
-          name: rust-release-${{ matrix.os }}
-          path: target/release/
+          name: gemma-on-device-${{ matrix.os }}
+          # `tauri build` emits bundles to the workspace-root `target/`, not `src-tauri/target/`
+          # (the workspace is declared in the root `Cargo.toml`).
+          path: target/release/bundle
           retention-days: 7
           if-no-files-found: error

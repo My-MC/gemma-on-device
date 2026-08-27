@@ -117,7 +117,7 @@ async fn download_model(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Ensure ort is initialized once at startup (CPU default)
-    let _ = ort::init().commit();
+    init_ort();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -142,6 +142,66 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Initialize the `ort` environment once at process start.
+///
+/// On non-Windows targets `ort` is statically linked, so `ort::init()` is
+/// sufficient. On Windows the `load-dynamic` feature is required to avoid a
+/// CRT mismatch, which means `onnxruntime.dll` is *not* vendored by `ort`
+/// itself. We resolve the DLL in this order so installed bundles and dev
+/// runs both work out of the box:
+///
+/// 1. `ORT_DYLIB_PATH` env var (explicit override; matches `ort`'s own
+///    default resolution).
+/// 2. `<exe-dir>/onnxruntime.dll` (where CI places it, and where Tauri's
+///    `bundle.resources` will install it for MSI/NSIS bundles in some
+///    configurations).
+/// 3. `ort::init()` fallback (lets `ort` use its own DLL search rules, which
+///    is enough when the DLL is on `PATH` or in the working directory).
+#[cfg(target_os = "windows")]
+fn init_ort() {
+    // `ort::init_from` only exists when the `load-dynamic` feature is on;
+    // without it `ort` is statically linked (or fails at link time) and
+    // `ort::init()` is the only init entry point.
+    #[cfg(feature = "load-dynamic")]
+    {
+        use std::path::PathBuf;
+
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        if let Ok(p) = std::env::var("ORT_DYLIB_PATH") {
+            candidates.push(PathBuf::from(p));
+        }
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                candidates.push(dir.join("onnxruntime.dll"));
+            }
+        }
+
+        if let Some(path) = candidates.into_iter().find(|p| p.exists()) {
+            match ort::init_from(path.clone()) {
+                Ok(builder) => {
+                    if builder.commit() {
+                        return;
+                    }
+                    eprintln!(
+                        "[ort] init_from({}) loaded but commit() returned false.",
+                        path.display()
+                    );
+                }
+                Err(e) => eprintln!(
+                    "[ort] init_from({}) failed: {e}. Falling back to default init.",
+                    path.display()
+                ),
+            }
+        }
+    }
+    let _ = ort::init().commit();
+}
+
+#[cfg(not(target_os = "windows"))]
+fn init_ort() {
+    let _ = ort::init().commit();
 }
 
 /// Resolve model dir considering mobile sandbox (app_data_dir) vs desktop dev (project models/)

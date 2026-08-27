@@ -202,7 +202,7 @@ bun run check:ort             # rustc/cargo/ort/models/tauri-cli diagnostics
 
 ```bash
 bun run build                 # vite only
-bun run tauri build           # Tauri bundle (src-tauri/target/release/bundle)
+bun run tauri build           # Tauri bundle (target/release/bundle, workspace root)
 # With execution provider
 bun run tauri build -- --features cuda
 ```
@@ -218,6 +218,34 @@ Set `GEMMA_COREML_PROFILE=1` when launching the app to log CoreML's per-operator
 hardware assignment and estimated execution time for GPU diagnostics.
 
 Thresholds: desktop 5 tok/s / mobile 2 tok/s (INT4).
+
+### Windows: `onnxruntime.dll` for `load-dynamic`
+
+Windows builds use the `load-dynamic` Cargo feature to avoid a CRT mismatch
+between `ort`'s MD linkage and the MT linkage of `esaxx` / `onig`. With
+`load-dynamic` the `ort` crate no longer vendors `onnxruntime.dll`, so the DLL
+must be present at runtime or `ort::init()` fails.
+
+Resolution order used by `src-tauri/src/lib.rs:init_ort()`:
+
+1. `ORT_DYLIB_PATH` env var (explicit override, also picked up by `ort`).
+2. `<exe-dir>/onnxruntime.dll` — where CI drops it via
+   `.github/workflows/ci.yml` (`Stage onnxruntime.dll for Windows bundle`) and
+   where `tauri.conf.json` `bundle.resources` places it for installed bundles.
+3. `ort::init()` fallback (lets `ort` use its own DLL search rules).
+
+For a manual Windows desktop build, place the matching DLL next to the binary
+or point `ORT_DYLIB_PATH` at it. The version must match the `ort` wheel —
+`ort 2.0.0-rc.13` vendors ONNX Runtime 1.22.0:
+
+```bash
+# x64
+curl -fsSL -o /tmp/ort.zip https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-win-x64-1.22.0.zip
+echo '174c616efc0271194488642a72f1a514e01487da4dfe84c49296d66e40ebe0da  /tmp/ort.zip' | sha256sum -c -
+unzip -j /tmp/ort.zip 'onnxruntime-win-x64-1.22.0/lib/onnxruntime.dll' -d src-tauri/target/release/ 2>/dev/null \
+  || unzip -j /tmp/ort.zip 'onnxruntime-win-x64-1.22.0/lib/onnxruntime.dll' -d target/release/
+bun run tauri build -- --features load-dynamic
+```
 
 ## Mobile
 
