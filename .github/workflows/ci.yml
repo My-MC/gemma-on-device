@@ -50,6 +50,13 @@ jobs:
           bun-version: "1.3.14"
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
+      # `tauri.conf.json` `bundle.resources` references
+      # `../target/release/onnxruntime.dll`, and Tauri's build script fails if
+      # that path is missing. Stage it now (placeholder on non-Windows, real
+      # DLL on Windows) so `cargo check`/`clippy` and the Tauri build all see
+      # the file.
+      - name: Stage onnxruntime.dll for build script
+        run: bun run download:ort-dll
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
