@@ -72,29 +72,12 @@ jobs:
         env:
           CI: true
       # `load-dynamic` does not link or vendor `onnxruntime.dll`; without it the
-      # installed bundle fails to init ort at runtime. The DLL version must
-      # match the `ort 2.0.0-rc.13` wheel, which vendors ONNX Runtime 1.22.0.
-      # Stage the DLL before `tauri build` so `tauri.conf.json` `bundle.resources`
-      # picks it up into the MSI/NSIS installer; the same path is also next to
-      # the raw .exe, which `ort::init_from()` resolves first on dev runs.
+      # installed bundle fails to init ort at runtime. Re-stage right before
+      # `tauri build` so the installer ships the pinned version. All downloads
+      # go through scripts/download_ort_dll.ts (SHA256-verified before save).
       - name: Stage onnxruntime.dll for Windows bundle
         if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $ortVersion = '1.22.0'
-          $url = "https://github.com/microsoft/onnxruntime/releases/download/v$ortVersion/onnxruntime-win-x64-$ortVersion.zip"
-          $zip = Join-Path $env:RUNNER_TEMP "onnxruntime-$ortVersion.zip"
-          $work = Join-Path $env:RUNNER_TEMP "onnxruntime-extract"
-          $dest = Join-Path $env:GITHUB_WORKSPACE "target\release\onnxruntime.dll"
-          New-Item -ItemType Directory -Force -Path $work | Out-Null
-          Invoke-WebRequest -Uri $url -OutFile $zip
-          Expand-Archive -Path $zip -DestinationPath $work -Force
-          $dll = Get-ChildItem -Path $work -Recurse -Filter 'onnxruntime.dll' | Select-Object -First 1
-          if (-not $dll) { throw "onnxruntime.dll not found inside $zip" }
-          New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
-          Copy-Item -Path $dll.FullName -Destination $dest -Force
-          Write-Host "Staged $($dll.FullName) -> $dest"
+        run: bun scripts/download_ort_dll.ts --force
       - name: Build Tauri bundle — Windows (dynamic ONNX Runtime to avoid CRT mismatch)
         if: runner.os == 'Windows'
         # ort's static CRT (MD) vs esaxx/onig's MT causes LNK2038 on Windows.

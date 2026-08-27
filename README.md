@@ -241,6 +241,7 @@ or point `ORT_DYLIB_PATH` at it. The version must match the `ort` wheel —
 ```bash
 # x64
 curl -fsSL -o /tmp/ort.zip https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-win-x64-1.22.0.zip
+echo '174c616efc0271194488642a72f1a514e01487da4dfe84c49296d66e40ebe0da  /tmp/ort.zip' | sha256sum -c -
 unzip -j /tmp/ort.zip 'onnxruntime-win-x64-1.22.0/lib/onnxruntime.dll' -d src-tauri/target/release/ 2>/dev/null \
   || unzip -j /tmp/ort.zip 'onnxruntime-win-x64-1.22.0/lib/onnxruntime.dll' -d target/release/
 bun run tauri build -- --features load-dynamic

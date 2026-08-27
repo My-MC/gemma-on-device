@@ -15,11 +15,18 @@
  *
  * Versioning: the DLL must match the `ort` wheel. `ort 2.0.0-rc.13` vendors
  * ONNX Runtime 1.22.0; bump together if `ort` is upgraded.
+ *
+ * Integrity: the downloaded archive is SHA256-verified against
+ * `EXPECTED_ZIP_SHA256` before anything is written to disk or extracted.
  */
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 const ORT_VERSION = "1.22.0";
+
+// SHA256 of `onnxruntime-win-x64-1.22.0.zip` (official microsoft/onnxruntime
+// v1.22.0 release asset). Bump together with ORT_VERSION.
+const EXPECTED_ZIP_SHA256 = "174c616efc0271194488642a72f1a514e01487da4dfe84c49296d66e40ebe0da";
 
 interface PlatformAsset {
   dllName: string;
@@ -68,9 +75,17 @@ async function main(): Promise<void> {
     throw new Error(`Failed to download ${asset.url}: ${res.status} ${res.statusText}`);
   }
 
+  const buf = Buffer.from(await res.arrayBuffer());
+  const sha256 = new Bun.CryptoHasher("sha256").update(buf).digest("hex");
+  if (sha256 !== EXPECTED_ZIP_SHA256) {
+    throw new Error(
+      `SHA256 mismatch for ${asset.assetName}: expected ${EXPECTED_ZIP_SHA256}, got ${sha256}. Refusing to stage an unverified DLL.`,
+    );
+  }
+  console.log(`[download_ort_dll] SHA256 verified: ${sha256}`);
+
   // Use PowerShell's Expand-Archive on Windows (no native zip module in Bun).
   const zipPath = join(process.cwd(), "target", `onnxruntime-${ORT_VERSION}.zip`);
-  const buf = Buffer.from(await res.arrayBuffer());
   await Bun.write(zipPath, buf);
 
   const extractDir = join(process.cwd(), "target", `onnxruntime-extract-${ORT_VERSION}`);
