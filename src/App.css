@@ -61,7 +61,7 @@
   color: var(--text);
   background: var(--bg);
   font-synthesis: none;
-  text-rendering: optimizeLegibility;
+  text-rendering: optimizelegibility;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -83,7 +83,7 @@
     --input-bg: #1f1f1f;
 
     --btn-primary-bg: #3b82f6;
-    --btn-primary-fg: #ffffff;
+    --btn-primary-fg: #111827;
     --outline-bg: transparent;
     --outline-fg: #f6f6f6;
 
