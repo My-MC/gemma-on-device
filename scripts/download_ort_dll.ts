@@ -4,10 +4,9 @@
  *
  * Why: `ort 2.0.0-rc.13` with the `load-dynamic` Cargo feature (required on
  * Windows to avoid a CRT mismatch with `esaxx` / `onig`) does *not* vendor
- * `onnxruntime.dll` at build time. `tauri.conf.json` references the file via
- * `bundle.resources`, so it must exist before `tauri build` validates the
- * resource manifest. We also keep a copy next to the raw `.exe` so dev runs
- * resolve the DLL via `ort::init_from()` without any extra setup.
+ * `onnxruntime.dll` at build time. The bundling mapping lives in
+ * `src-tauri/tauri.windows.conf.json` (`bundle.resources`), so the file must
+ * exist there before `tauri build` validates the resource manifest.
  *
  * Usage:
  *   bun scripts/download_ort_dll.ts            # no-op on non-Windows
@@ -53,13 +52,9 @@ async function main(): Promise<void> {
   mkdirSync(join(process.cwd(), "target", "release"), { recursive: true });
 
   if (!asset) {
-    // Non-Windows: `ort` links the runtime statically, so the file is unused at
-    // runtime, but `tauri build` still validates that every `bundle.resources`
-    // entry exists on disk. Drop a tiny placeholder so the validation passes.
-    if (!existsSync(target)) {
-      await Bun.write(target, "// placeholder; ort statically links on non-Windows\n");
-    }
-    console.log(`[download_ort_dll] No DLL required on ${platform}; placeholder written.`);
+    // Only Windows maps `onnxruntime.dll` into the bundle (see
+    // tauri.windows.conf.json); other platforms link `ort` statically.
+    console.log(`[download_ort_dll] No DLL required on ${platform}; nothing to do.`);
     return;
   }
 
