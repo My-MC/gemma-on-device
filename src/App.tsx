@@ -342,7 +342,7 @@ export default function App() {
           )}
 
           {downloadComplete && (
-            <div className="hint" style={{ background: "#ecfdf5", border: "1px solid #a7f3d0" }}>
+            <div className="hint success">
               ✓ ダウンロード完了: <code>{downloadComplete.length} files</code> — 自動で model ✓ に切替わり、生成で実推論が使われます。
               {downloadComplete.map((f) => (
                 <div key={f} style={{ fontSize: "0.75rem", wordBreak: "break-all" }}>{f}</div>
