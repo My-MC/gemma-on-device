@@ -108,13 +108,12 @@ jobs:
             echo "Android signing secrets are configured." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "Android build skipped: configure ANDROID_KEY_BASE64, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD, and ANDROID_STORE_PASSWORD repository secrets." >> "$GITHUB_STEP_SUMMARY"
+            echo "Android signing secrets are unavailable; building unsigned APK/AAB packages. Configure ANDROID_KEY_BASE64, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD, and ANDROID_STORE_PASSWORD to produce signed packages." >> "$GITHUB_STEP_SUMMARY"
           fi
 
   android:
-    name: Android (signed APK and AAB)
+    name: Android (APK and AAB)
     needs: [frontend, android-signing]
-    if: needs.android-signing.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -143,6 +142,7 @@ jobs:
       - name: Initialize Android project
         run: bun run tauri android init --ci
       - name: Configure Android release signing
+        if: needs.android-signing.outputs.enabled == 'true'
         env:
           ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -188,7 +188,7 @@ jobs:
           )
           path.write_text(source)
           PY
-      - name: Build signed Android APK and AAB
+      - name: Build Android APK and AAB
         run: bun run tauri android build --ci --target aarch64 --features nnapi --apk --aab
       - name: Upload Android packages
         uses: actions/upload-artifact@v7

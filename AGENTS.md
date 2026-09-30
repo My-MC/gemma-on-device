@@ -97,7 +97,7 @@ Follow global `~/.config/opencode/AGENTS.md`:
 
 - EPs in `src-tauri/Cargo.toml:31` are enabled via `cargo tauri build -- --features cuda`. Default is CPU.
 - Android: `cargo ndk`, `aarch64-linux-android` etc.; iOS: `aarch64-apple-ios`
-- CI builds signed Android ARM64 APK/AAB on `master` pushes, pull requests, and manual runs when `ANDROID_KEY_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and `ANDROID_STORE_PASSWORD` are available as repository secrets. Otherwise it reports the skip in the workflow summary; GitHub withholds these secrets from fork pull requests.
+- CI builds Android ARM64 APK/AAB on `master` pushes, pull requests, and manual runs. When `ANDROID_KEY_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and `ANDROID_STORE_PASSWORD` are available as repository secrets, CI signs the packages; otherwise it builds unsigned packages and reports that mode. GitHub withholds these secrets from fork pull requests. Unsigned APKs require signing before device installation.
 - CI builds an unsigned iOS ARM64 Release IPA with Tauri `--no-sign` on `master` pushes, pull requests, and manual runs. AltStore Classic signs it during sideloading, so no iOS signing secrets are required. Mobile artifacts are retained for seven days.
 - 1B INT4 is 1.2GB + 2-3GB RAM at inference → 4GB+ device recommended. 3n-E2B is mobile-optimized.
 
