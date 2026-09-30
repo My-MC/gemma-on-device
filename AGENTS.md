@@ -51,7 +51,7 @@ cargo build --manifest-path src-tauri/Cargo.toml
 - **Branching**: Never commit directly to `main`. Create a feature branch per task from `main` (`feat/<scope>`, `fix/<scope>`, `chore/<scope>`, `docs/<scope>`).
 - **Commits**: Keep commits atomic and reviewable. Each commit that touches `src-tauri/` must have passed `cargo check`, `cargo clippy -- -D warnings`, `cargo fmt -- --check` locally.
 - **PRs**: Open a PR via `gh pr create` for every branch. Title uses conventional prefix (`feat:`, `fix:`, `chore:`, `docs:`). Fill in summary, verification, and risk. CI must be green before merge.
-- **Merging**: Do NOT merge directly to `main` locally (`git merge main` is for updating feature branch only). Merge only via GitHub PR (Squash or Merge). Do NOT use `git push origin main` from a feature branch.
+- **Merging**: Do NOT merge directly to `main` locally (`git merge main` is for updating feature branch only). Merge only via GitHub PR after CI passes. Use a Merge Commit for large feature, behavior, or architecture changes and PRs spanning multiple areas. Use Squash Merge for library/dependency updates and small, focused maintenance PRs. Do NOT use `git push origin main` from a feature branch.
 - **Docs**: Update `AGENTS.md` / `CONTRIBUTING.md` / `README.md` when workflow, quality gates, or model handling changes.
 - See `CONTRIBUTING.md` for full contributor workflow including SHA256 model verification.
 

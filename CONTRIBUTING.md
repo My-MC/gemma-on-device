@@ -36,7 +36,10 @@ bun run tauri dev          # Desktop (see README for WSL flags)
    gh pr create --title "feat: short summary" --body "Summary / Verification / Risk"
    ```
    Title must use Conventional prefix: `feat:`, `fix:`, `chore:`, `docs:`.
-5. CI must be green before merge. Merge only via GitHub PR (Squash or Merge commit). Do not run `git merge main` into `main` locally or `git push origin main` from a feature branch. To update a feature branch:
+5. CI must be green before merge. Merge only via GitHub PR, choosing the strategy by the size and purpose of the change:
+   - Use a **Merge Commit** for large feature, behavior, or architecture changes and PRs spanning multiple areas, preserving their commit history.
+   - Use **Squash Merge** for library/dependency updates and small, focused maintenance PRs.
+   Do not run `git merge main` into `main` locally or `git push origin main` from a feature branch. To update a feature branch:
    ```bash
    git fetch origin && git merge origin/main
    # or git rebase origin/main
