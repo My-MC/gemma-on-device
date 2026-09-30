@@ -114,7 +114,7 @@ jobs:
   android:
     name: Android (APK and AAB)
     needs: [frontend, android-signing]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
@@ -130,7 +130,10 @@ jobs:
       - uses: android-actions/setup-android@v4
       - name: Install Android NDK
         run: |
-          sdkmanager "platforms;android-37"
+          sdkmanager "platforms;android-37.0"
+          if [[ ! -e "$ANDROID_HOME/platforms/android-37" ]]; then
+            ln -s "$ANDROID_HOME/platforms/android-37.0" "$ANDROID_HOME/platforms/android-37"
+          fi
           sdkmanager "ndk;27.2.12479018"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
           echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
