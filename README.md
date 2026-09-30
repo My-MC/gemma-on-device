@@ -229,6 +229,22 @@ must be installed on the host. Linux and macOS provider dependencies must have
 relative loader paths (`$ORIGIN` / `@loader_path`) so libraries in the resource
 directory can find their sibling dependencies.
 
+CI downloads edition runtime archives from a GitHub Release whose tag is set
+in the repository Actions variable `GEMMA_RUNTIME_RELEASE_TAG`. Each archive
+must contain the edition runtime files and `runtime-manifest.json` at its root.
+Use these asset names: `runtime-win32-x64-cuda.tar.gz`,
+`runtime-win32-x64-migraphx.tar.gz`, `runtime-linux-x64-cuda.tar.gz`,
+`runtime-linux-x64-migraphx.tar.gz`, and
+`runtime-darwin-<x64|arm64>-coreml.tar.gz`. CI verifies the release asset's
+SHA256 digest and then verifies every runtime file against the manifest.
+Release assets are limited to less than 2 GiB each.
+
+When `GEMMA_RUNTIME_RELEASE_TAG` points to a release with those assets, CI
+builds each supported edition and uploads its Tauri bundle as a separate
+Actions artifact named `gemma-on-device-<edition>-<runner>-<arch>`. These
+artifacts are retained for 7 days. Without the variable, the optional edition
+bundle job is skipped; the default CPU build and feature checks still run.
+
 The manifest keys are `edition`, `target`, `ort_version`, `webgpu_ep_version`,
 `primary_ep_version`, and `files`; `files` maps each relative runtime path to its lowercase SHA256. CUDA and MIGraphX manifests must include their matching provider shared library.
 Keep DLL/SO/dylib dependencies beside the EP libraries so the platform loader
@@ -240,7 +256,8 @@ MIGraphX bundles use AMD's ONNX Runtime plugin EP built against the pinned ORT
 Windows and Linux builds. The Windows edition requires the AMD plugin's source
 build path and must be validated on an AMD GPU before distribution. macOS
 CoreML bundles must include an ORT build with CoreML enabled for the target
-architecture. The standard CI builds the default CPU app; hardware EP smoke
+architecture. The standard CI always builds the default CPU app; edition
+bundles are built when the runtime release is configured. Hardware EP smoke
 tests require the corresponding self-hosted GPU runners.
 
 Thresholds: desktop 5 tok/s / mobile 2 tok/s (INT4).

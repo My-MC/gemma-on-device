@@ -94,7 +94,7 @@ Follow global `~/.config/opencode/AGENTS.md`:
 
 ## Mobile
 
-- Desktop editions are built with `bun run tauri:cuda`, `bun run tauri:migraphx`, or `bun run tauri:coreml`; each expects a SHA256-locked runtime under `runtime-artifacts/`. Default remains CPU.
+- Desktop editions are built with `bun run tauri:cuda`, `bun run tauri:migraphx`, or `bun run tauri:coreml`; each expects a SHA256-locked runtime under `runtime-artifacts/`. CI downloads these bundles from the GitHub Release selected by the `GEMMA_RUNTIME_RELEASE_TAG` repository variable and uploads each built edition as a separate 7-day Actions artifact. Default remains CPU.
 - Android: `cargo ndk`, `aarch64-linux-android` etc.; iOS: `aarch64-apple-ios`
 - 1B INT4 is 1.2GB + 2-3GB RAM at inference → 4GB+ device recommended. 3n-E2B is mobile-optimized.
 

@@ -154,7 +154,7 @@ CI will enforce the same gates (`.github/workflows` upcoming). A PR with failing
 
 ## Mobile
 
-- Desktop editions use `bun run tauri:cuda`, `bun run tauri:migraphx`, and `bun run tauri:coreml`. Each requires a matching runtime package in `runtime-artifacts/<platform>-<arch>/<edition>/` with a SHA256 manifest; see README for the package contract. Default remains CPU.
+- Desktop editions use `bun run tauri:cuda`, `bun run tauri:migraphx`, and `bun run tauri:coreml`. Each requires a matching runtime package in `runtime-artifacts/<platform>-<arch>/<edition>/` with a SHA256 manifest; see README for the package contract and the GitHub Release asset names used by CI. CI uploads each configured edition bundle as a separate 7-day Actions artifact. Default remains CPU.
 - Android: `cargo ndk` targets `aarch64-linux-android` etc., plus `xnnpack`/`nnapi`. iOS: `aarch64-apple-ios`. See `README.md` for SDK setup.
 - Memory: 1B INT4 ~1.2 GB disk + 2-3 GB RAM at inference → 4 GB+ device recommended.
 
