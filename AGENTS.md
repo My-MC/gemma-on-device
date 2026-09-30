@@ -10,8 +10,8 @@ This file defines operational rules for agents/contributors in `gemma-on-device`
 
 ## Tech Stack (Fixed)
 
-- **Rust**: `ort =2.0.0-rc.13` (`half` feature, EPs: `cuda`/`coreml`/`directml`/`nnapi`/`tensorrt`/`xnnpack`), `tokenizers 0.22`, `tauri 2.11`, `tokio full`, `reqwest 0.12` (`rustls-tls` + `stream`), `anyhow`, `ndarray 0.16`
-- **JS**: `Bun 1.3.14` (package manager + runtime), `React 19`, `Vite 7.3.6`, `TypeScript 5.8`, `@tauri-apps/api 2.11`, `@tauri-apps/cli 2.11`
+- **Rust**: `ort =2.0.0-rc.13` (`half` feature, EPs: `cuda`/`coreml`/`directml`/`nnapi`/`tensorrt`/`xnnpack`), `tokenizers 0.22`, `tauri 2.12`, `tauri-plugin-opener 2.7`, `tokio full`, `reqwest 0.12` (`rustls-tls` + `stream`), `anyhow`, `ndarray 0.16`
+- **JS**: `Bun 1.3.14` (package manager + runtime), `React 19`, `Vite 7.3.6`, `TypeScript 5.8`, `@tauri-apps/api 2.12`, `@tauri-apps/plugin-opener 2.7`, `@tauri-apps/cli 2.12`
 - **Build**: `vite.config.ts` uses `port 1420 strictPort`, `host TAURI_DEV_HOST`, `frontendDist ../dist`; `tauri.conf.json` uses `beforeDevCommand: bun run dev`
 - **JS execution**: `package.json:scripts` call `vite` directly. Run with `bun run dev` / `bun run build`. Do NOT use `bunx --bun vite`.
 
