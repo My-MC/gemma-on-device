@@ -40,6 +40,8 @@ chrono = { version = "0.4", features = ["serde"] }
 default = []
 # Execution Providers - enable per target
 cuda = ["ort/cuda"]
+webgpu = ["ort/webgpu"]
+desktop-gpu = ["cuda", "webgpu", "load-dynamic"]
 tensorrt = ["ort/tensorrt"]
 coreml = ["ort/coreml"]
 directml = ["ort/directml"]
