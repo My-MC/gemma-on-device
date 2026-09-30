@@ -35,6 +35,7 @@ type BenchResult = {
   avg_tokens_per_sec: number;
   total_tokens: number;
   is_mock: boolean;
+  execution_provider: string;
   timestamp: string;
 };
 
@@ -691,7 +692,7 @@ export default function App() {
             <div className="result">
               <div className="result-header">
                 <strong>
-                  {result.is_mock ? "MOCK" : "ort"} — {result.model_id}
+                  {result.is_mock ? "MOCK" : result.execution_provider} — {result.model_id}
                 </strong>
                 <span className="muted">
                   {result.prompt_tokens} + {result.generated_tokens} ={" "}
@@ -732,6 +733,9 @@ export default function App() {
             </div>
             <div>
               <strong>Platform</strong> {bench.platform}/{bench.arch}
+            </div>
+            <div>
+              <strong>EP</strong> {bench.execution_provider}
             </div>
             <div>
               <strong>Avg latency</strong> {bench.avg_latency_ms.toFixed(1)} ms

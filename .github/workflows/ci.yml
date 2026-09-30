@@ -15,6 +15,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  provider-features:
+    name: provider features (${{ matrix.os }}, ${{ matrix.feature }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            feature: desktop-cuda
+          - os: ubuntu-latest
+            feature: desktop-migraphx
+          - os: windows-latest
+            feature: desktop-cuda
+          - os: windows-latest
+            feature: desktop-migraphx
+          - os: macos-latest
+            feature: desktop-coreml
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Tauri system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Check edition feature
+        run: cargo check --manifest-path src-tauri/Cargo.toml --features ${{ matrix.feature }}
+      - name: Clippy edition feature
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --features ${{ matrix.feature }} -- -D warnings
+
   frontend:
     name: frontend (Biome + bun build)
     runs-on: ubuntu-latest

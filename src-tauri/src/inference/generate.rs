@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ort::session::SessionInputValue;
+use ort::session::{Session, SessionInputValue};
 use ort::value::Tensor;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
@@ -12,6 +12,7 @@ use super::tokenizer::{apply_gemma_chat_template, load_tokenizer, mock_detokeniz
 const NUM_LAYERS: usize = 26;
 const NUM_KV_HEADS: usize = 1;
 const HEAD_DIM: usize = 256;
+type KvCache = Vec<(Vec<f32>, Vec<f32>)>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateOptions {
@@ -31,6 +32,7 @@ pub struct GenerateResult {
     pub tokens_per_sec: f64,
     pub is_mock: bool,
     pub model_id: String,
+    pub execution_provider: String,
 }
 
 /// Core generation - if model not present, returns mock response for pipeline validation
@@ -78,6 +80,7 @@ fn mock_generate(prompt: &str, max_tokens: usize) -> GenerateResult {
         tokens_per_sec: tokens as f64 / (latency as f64 / 1000.0).max(0.001),
         is_mock: true,
         model_id: "mock/gemma-3-1b-it-INT4".to_string(),
+        execution_provider: "Mock".to_string(),
     }
 }
 
@@ -98,9 +101,11 @@ async fn try_real_inference(
     // Load or reuse session
     let mut guard = state.session.lock().await;
     if guard.is_none() {
-        let session = super::session::create_session(&model_path)?;
+        let (session, execution_provider) =
+            super::session::create_session(&model_path, &state.runtime_dir, &[])?;
         *guard = Some(super::session::InferenceSession {
             session,
+            execution_provider,
             model_info: super::session::ModelInfo {
                 model_id: "gemma-3-1b-it-INT4".to_string(),
                 onnx_path: model_path.to_string_lossy().to_string(),
@@ -112,81 +117,61 @@ async fn try_real_inference(
             },
         });
     }
-
-    let session = guard.as_mut().unwrap();
+    let mut execution_provider = guard
+        .as_ref()
+        .map(|session| session.execution_provider.clone())
+        .unwrap_or_else(|| "CPU".to_string());
 
     let mut generated_ids: Vec<i64> = Vec::new();
     let mut current_ids = input_ids.clone();
-    let mut cache: Option<Vec<(Vec<f32>, Vec<f32>)>> = None;
+    let mut cache: Option<KvCache> = None;
     let mut decode_stream = emit.map(|_| tokenizer.inner().decode_stream(true));
 
-    for _ in 0..max_tokens {
-        let seq_len = current_ids.len();
+    let mut failed_providers = Vec::new();
+    for iteration in 0..max_tokens {
         let past_len = cache
             .as_ref()
             .and_then(|layers| layers.first())
             .map(|(key, _)| key.len() / (NUM_KV_HEADS * HEAD_DIM))
             .unwrap_or(0);
-        // Use tuple (shape, Vec) to avoid ndarray version mismatch with ort's private ndarray
-        let input_ids_tensor = Tensor::from_array(([1, seq_len], current_ids.clone()))
-            .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
-        let attention_len = past_len + seq_len;
-        let attention_mask_tensor =
-            Tensor::from_array(([1, attention_len], vec![1i64; attention_len]))
-                .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
-
-        let mut inputs: Vec<(String, SessionInputValue)> = vec![
-            ("input_ids".to_string(), input_ids_tensor.into()),
-            ("attention_mask".to_string(), attention_mask_tensor.into()),
-        ];
-        for layer in 0..NUM_LAYERS {
-            let (key, value) = cache
+        let outputs = loop {
+            let inputs = make_session_inputs(&current_ids, past_len, &cache)?;
+            let active_provider = guard
                 .as_ref()
-                .map(|layers| layers[layer].clone())
-                .unwrap_or_default();
-            let key_tensor =
-                Tensor::<f32>::from_array(([1, NUM_KV_HEADS, past_len, HEAD_DIM], key))
-                    .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
-            let value_tensor =
-                Tensor::<f32>::from_array(([1, NUM_KV_HEADS, past_len, HEAD_DIM], value))
-                    .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
-            inputs.push((format!("past_key_values.{layer}.key"), key_tensor.into()));
-            inputs.push((
-                format!("past_key_values.{layer}.value"),
-                value_tensor.into(),
-            ));
-        }
+                .map(|session| session.execution_provider.clone())
+                .unwrap_or_else(|| "CPU".to_string());
+            let run_result = {
+                let session = &mut guard.as_mut().unwrap().session;
+                run_session_step(session, inputs)
+            };
+            match run_result {
+                Ok(step) => break step,
+                Err(error) if iteration == 0 => {
+                    let error = error.to_string();
+                    failed_providers.push(active_provider.clone());
+                    let (replacement, replacement_provider) = super::session::create_session(
+                        &model_path,
+                        &state.runtime_dir,
+                        &failed_providers,
+                    )
+                    .map_err(|fallback| {
+                        anyhow::anyhow!(
+                            "Initial inference failed on {active_provider}: {error}; fallback failed: {fallback}"
+                        )
+                    })?;
+                    let model_info = guard.as_ref().unwrap().model_info.clone();
+                    *guard = Some(super::session::InferenceSession {
+                        session: replacement,
+                        execution_provider: replacement_provider.clone(),
+                        model_info,
+                    });
+                    execution_provider = replacement_provider;
+                }
+                Err(error) => return Err(anyhow::anyhow!("ort run error: {error}")),
+            }
+        };
 
-        let outputs = session
-            .session
-            .run(inputs)
-            .map_err(|e| anyhow::anyhow!("ort run error: {e}"))?;
-
-        let logits = outputs["logits"]
-            .try_extract_tensor::<f32>()
-            .map_err(|e| anyhow::anyhow!("extract error: {e}"))?;
-        let (shape, data) = logits;
-        // shape is &[i64] for ort 2.0; cast to usize
-        if shape.len() != 3 {
-            anyhow::bail!("unexpected logits shape: {:?}", shape);
-        }
-        let vocab = shape[2] as usize;
-        let seq = shape[1] as usize;
-        // last token logits
-        let last_offset = (seq - 1) * vocab;
-        let last_logits = &data[last_offset..last_offset + vocab];
-        let next_id = argmax(last_logits) as i64;
-
-        let mut next_cache = Vec::with_capacity(NUM_LAYERS);
-        for layer in 0..NUM_LAYERS {
-            let (_, key) = outputs[format!("present.{layer}.key")]
-                .try_extract_tensor::<f32>()
-                .map_err(|e| anyhow::anyhow!("extract present key error: {e}"))?;
-            let (_, value) = outputs[format!("present.{layer}.value")]
-                .try_extract_tensor::<f32>()
-                .map_err(|e| anyhow::anyhow!("extract present value error: {e}"))?;
-            next_cache.push((key.to_vec(), value.to_vec()));
-        }
+        let (next_id, next_cache) = outputs;
         cache = Some(next_cache);
 
         // EOS token for Gemma is 1 (<eos>) or 106 (<end_of_turn>) - simple check
@@ -231,7 +216,75 @@ async fn try_real_inference(
         tokens_per_sec,
         is_mock: false,
         model_id: "gemma-3-1b-it-INT4".to_string(),
+        execution_provider,
     })
+}
+
+fn make_session_inputs(
+    current_ids: &[i64],
+    past_len: usize,
+    cache: &Option<KvCache>,
+) -> Result<Vec<(String, SessionInputValue<'static>)>> {
+    let seq_len = current_ids.len();
+    // Tuple shapes avoid ndarray version mismatch with ort's private ndarray.
+    let input_ids_tensor = Tensor::from_array(([1, seq_len], current_ids.to_vec()))
+        .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
+    let attention_len = past_len + seq_len;
+    let attention_mask_tensor = Tensor::from_array(([1, attention_len], vec![1i64; attention_len]))
+        .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
+    let mut inputs: Vec<(String, SessionInputValue)> = vec![
+        ("input_ids".to_string(), input_ids_tensor.into()),
+        ("attention_mask".to_string(), attention_mask_tensor.into()),
+    ];
+    for layer in 0..NUM_LAYERS {
+        let (key, value) = cache
+            .as_ref()
+            .map(|layers| layers[layer].clone())
+            .unwrap_or_default();
+        let key_tensor = Tensor::<f32>::from_array(([1, NUM_KV_HEADS, past_len, HEAD_DIM], key))
+            .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
+        let value_tensor =
+            Tensor::<f32>::from_array(([1, NUM_KV_HEADS, past_len, HEAD_DIM], value))
+                .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
+        inputs.push((format!("past_key_values.{layer}.key"), key_tensor.into()));
+        inputs.push((
+            format!("past_key_values.{layer}.value"),
+            value_tensor.into(),
+        ));
+    }
+    Ok(inputs)
+}
+
+fn run_session_step(
+    session: &mut Session,
+    inputs: Vec<(String, SessionInputValue<'static>)>,
+) -> Result<(i64, KvCache)> {
+    let outputs = session
+        .run(inputs)
+        .map_err(|e| anyhow::anyhow!("ort run error: {e}"))?;
+    let logits = outputs["logits"]
+        .try_extract_tensor::<f32>()
+        .map_err(|e| anyhow::anyhow!("extract error: {e}"))?;
+    let (shape, data) = logits;
+    if shape.len() != 3 {
+        anyhow::bail!("unexpected logits shape: {:?}", shape);
+    }
+    let vocab = shape[2] as usize;
+    let seq = shape[1] as usize;
+    let last_offset = (seq - 1) * vocab;
+    let next_id = argmax(&data[last_offset..last_offset + vocab]) as i64;
+
+    let mut cache = Vec::with_capacity(NUM_LAYERS);
+    for layer in 0..NUM_LAYERS {
+        let (_, key) = outputs[format!("present.{layer}.key")]
+            .try_extract_tensor::<f32>()
+            .map_err(|e| anyhow::anyhow!("extract present key error: {e}"))?;
+        let (_, value) = outputs[format!("present.{layer}.value")]
+            .try_extract_tensor::<f32>()
+            .map_err(|e| anyhow::anyhow!("extract present value error: {e}"))?;
+        cache.push((key.to_vec(), value.to_vec()));
+    }
+    Ok((next_id, cache))
 }
 
 fn argmax(slice: &[f32]) -> usize {
@@ -282,7 +335,10 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn real_inference_smoke() {
-        let state = AppState::new(std::path::PathBuf::from("../models"));
+        let state = AppState::new(
+            std::path::PathBuf::from("../models"),
+            std::path::PathBuf::from("../runtime-artifacts"),
+        );
         let opts = GenerateOptions {
             prompt: "こんにちは".to_string(),
             max_tokens: Some(8),
@@ -298,7 +354,10 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn real_streaming_inference_smoke() {
-        let state = AppState::new(std::path::PathBuf::from("../models"));
+        let state = AppState::new(
+            std::path::PathBuf::from("../models"),
+            std::path::PathBuf::from("../runtime-artifacts"),
+        );
         let opts = GenerateOptions {
             prompt: "こんにちは".to_string(),
             max_tokens: Some(8),

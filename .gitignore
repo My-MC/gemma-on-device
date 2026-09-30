@@ -1,5 +1,6 @@
 /target
 /src-tauri/target
+/runtime-artifacts
 node_modules
 dist
 dist-ssr

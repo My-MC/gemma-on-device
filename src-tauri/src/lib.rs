@@ -1,5 +1,12 @@
 mod inference;
 
+#[cfg(any(
+    all(feature = "cuda", feature = "migraphx"),
+    all(feature = "cuda", feature = "coreml"),
+    all(feature = "migraphx", feature = "coreml")
+))]
+compile_error!("select exactly one desktop primary execution provider feature");
+
 use inference::generate::{GenerateOptions, GenerateResult};
 use inference::session::{resolve_model_dir, AppState, ModelInfo};
 use serde::{Deserialize, Serialize};
@@ -124,8 +131,9 @@ pub fn run() {
             // Desktop: prefer project `models/` for dev if it exists, else app_data_dir
             let model_dir = resolve_model_dir_for_app(app.handle());
             let _ = std::fs::create_dir_all(&model_dir);
+            let runtime_dir = resolve_runtime_dir(app.handle());
             // Also ensure app_data_dir exists for logs
-            app.manage(AppState::new(model_dir));
+            app.manage(AppState::new(model_dir, runtime_dir));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -142,21 +150,7 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-/// Initialize the `ort` environment once at process start.
-///
-/// On non-Windows targets `ort` is statically linked, so `ort::init()` is
-/// sufficient. On Windows the `load-dynamic` feature is required to avoid a
-/// CRT mismatch, which means `onnxruntime.dll` is *not* vendored by `ort`
-/// itself. We resolve the DLL in this order so installed bundles and dev
-/// runs both work out of the box:
-///
-/// 1. `ORT_DYLIB_PATH` env var (explicit override; matches `ort`'s own
-///    default resolution).
-/// 2. `<exe-dir>/onnxruntime.dll` (where CI places it, and where Tauri's
-///    `bundle.resources` will install it for MSI/NSIS bundles in some
-///    configurations).
-/// 3. `ort::init()` fallback (lets `ort` use its own DLL search rules, which
-///    is enough when the DLL is on `PATH` or in the working directory).
+/// Initialize the matching, packaged ONNX Runtime before any sessions are made.
 #[cfg(target_os = "windows")]
 fn init_ort(_app: &tauri::AppHandle) {
     // `ort::init_from` only exists when the `load-dynamic` feature is on;
@@ -166,17 +160,21 @@ fn init_ort(_app: &tauri::AppHandle) {
     {
         use std::path::PathBuf;
 
+        if let Ok(resources) = _app.path().resource_dir() {
+            add_runtime_dll_directory(&resources.join("ort-runtime"));
+        }
+
         let mut candidates: Vec<PathBuf> = Vec::new();
         if let Ok(p) = std::env::var("ORT_DYLIB_PATH") {
             candidates.push(PathBuf::from(p));
         }
         if let Ok(dir) = _app.path().resource_dir() {
-            candidates.push(dir.join("ort-gpu").join("onnxruntime.dll"));
+            candidates.push(dir.join("ort-runtime").join("onnxruntime.dll"));
             candidates.push(dir.join("onnxruntime.dll"));
         }
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
-                candidates.push(dir.join("ort-gpu").join("onnxruntime.dll"));
+                candidates.push(dir.join("ort-runtime").join("onnxruntime.dll"));
                 candidates.push(dir.join("onnxruntime.dll"));
             }
         }
@@ -202,6 +200,36 @@ fn init_ort(_app: &tauri::AppHandle) {
     let _ = ort::init().commit();
 }
 
+#[cfg(all(target_os = "windows", feature = "load-dynamic"))]
+fn add_runtime_dll_directory(path: &std::path::Path) {
+    use std::{os::windows::ffi::OsStrExt, sync::OnceLock};
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn SetDefaultDllDirectories(directory_flags: u32) -> i32;
+        fn AddDllDirectory(new_directory: *const u16) -> *mut std::ffi::c_void;
+    }
+
+    static DLL_DIRECTORY_COOKIE: OnceLock<usize> = OnceLock::new();
+    if !path.is_dir() {
+        return;
+    }
+    let mut wide_path = path.as_os_str().encode_wide().collect::<Vec<_>>();
+    wide_path.push(0);
+    let cookie = DLL_DIRECTORY_COOKIE.get_or_init(|| unsafe {
+        // DEFAULT_DIRS (0x1000) plus USER_DIRS (0x400) lets Windows resolve
+        // provider dependencies beside the packaged runtime libraries.
+        let _ = SetDefaultDllDirectories(0x1400);
+        AddDllDirectory(wide_path.as_ptr()) as usize
+    });
+    if *cookie == 0 {
+        eprintln!(
+            "[ort] failed to add runtime dependency directory: {}",
+            path.display()
+        );
+    }
+}
+
 #[cfg(all(target_os = "linux", feature = "load-dynamic"))]
 fn init_ort(app: &tauri::AppHandle) {
     use std::path::PathBuf;
@@ -211,12 +239,12 @@ fn init_ort(app: &tauri::AppHandle) {
         candidates.push(PathBuf::from(path));
     }
     if let Ok(dir) = app.path().resource_dir() {
-        candidates.push(dir.join("ort-gpu").join("libonnxruntime.so"));
+        candidates.push(dir.join("ort-runtime").join("libonnxruntime.so"));
         candidates.push(dir.join("libonnxruntime.so"));
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            candidates.push(dir.join("ort-gpu").join("libonnxruntime.so"));
+            candidates.push(dir.join("ort-runtime").join("libonnxruntime.so"));
         }
     }
 
@@ -234,12 +262,57 @@ fn init_ort(app: &tauri::AppHandle) {
     let _ = ort::init().commit();
 }
 
+#[cfg(all(target_os = "macos", feature = "load-dynamic"))]
+fn init_ort(app: &tauri::AppHandle) {
+    use std::path::PathBuf;
+
+    let mut candidates = Vec::new();
+    if let Ok(path) = std::env::var("ORT_DYLIB_PATH") {
+        candidates.push(PathBuf::from(path));
+    }
+    if let Ok(dir) = app.path().resource_dir() {
+        candidates.push(dir.join("ort-runtime").join("libonnxruntime.dylib"));
+        candidates.push(dir.join("libonnxruntime.dylib"));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("ort-runtime").join("libonnxruntime.dylib"));
+            candidates.push(dir.join("libonnxruntime.dylib"));
+        }
+    }
+    if let Some(path) = candidates.into_iter().find(|path| path.exists()) {
+        match ort::init_from(path.clone()) {
+            Ok(builder) if builder.commit() => return,
+            Ok(_) => eprintln!("[ort] init_from({}) returned false.", path.display()),
+            Err(error) => eprintln!("[ort] init_from({}) failed: {error}.", path.display()),
+        }
+    }
+    let _ = ort::init().commit();
+}
+
 #[cfg(all(
     not(target_os = "windows"),
-    not(all(target_os = "linux", feature = "load-dynamic"))
+    not(all(target_os = "linux", feature = "load-dynamic")),
+    not(all(target_os = "macos", feature = "load-dynamic"))
 ))]
 fn init_ort(_app: &tauri::AppHandle) {
     let _ = ort::init().commit();
+}
+
+fn resolve_runtime_dir(app: &tauri::AppHandle) -> std::path::PathBuf {
+    if let Ok(path) = std::env::var("GEMMA_RUNTIME_DIR") {
+        return path.into();
+    }
+    if let Ok(resources) = app.path().resource_dir() {
+        let bundled = resources.join("ort-runtime");
+        if bundled.exists() {
+            return bundled;
+        }
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|dir| dir.join("ort-runtime")))
+        .unwrap_or_else(|| std::path::PathBuf::from("ort-runtime"))
 }
 
 /// Resolve model dir considering mobile sandbox (app_data_dir) vs desktop dev (project models/)
