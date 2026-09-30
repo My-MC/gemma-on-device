@@ -2,7 +2,14 @@ use anyhow::Result;
 use ort::session::{Session, SessionInputValue};
 use ort::value::Tensor;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "rocm-worker")]
+use std::process::Stdio;
 use std::time::{Duration, Instant};
+#[cfg(feature = "rocm-worker")]
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    process::Command,
+};
 
 use super::session::AppState;
 use super::tokenizer::{apply_gemma_chat_template, load_tokenizer, mock_detokenize};
@@ -55,7 +62,210 @@ pub async fn generate_text(state: &AppState, opts: GenerateOptions) -> Result<Ge
 
     // Once model files exist, inference errors must be visible to the caller;
     // silently returning mock output makes a broken real setup look healthy.
+    #[cfg(feature = "rocm-worker")]
+    {
+        if state
+            .rocm_disabled
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            try_real_inference(state, &prompt, max_tokens, None).await
+        } else {
+            let (rocm_result, _) = try_rocm_worker(state, &prompt, max_tokens, None).await;
+            match rocm_result {
+                Ok(result) => Ok(result),
+                Err(rocm_error) => {
+                    state
+                        .rocm_disabled
+                        .store(true, std::sync::atomic::Ordering::Release);
+                    try_real_inference(state, &prompt, max_tokens, None)
+                        .await
+                        .map_err(|fallback| {
+                            anyhow::anyhow!(
+                                "ROCm failed: {rocm_error}; WebGPU/CPU fallback failed: {fallback}"
+                            )
+                        })
+                }
+            }
+        }
+    }
+    #[cfg(not(feature = "rocm-worker"))]
     try_real_inference(state, &prompt, max_tokens, None).await
+}
+
+#[cfg(feature = "rocm-worker")]
+#[derive(Serialize)]
+struct RocmWorkerRequest<'a> {
+    protocol: u32,
+    model_path: &'a str,
+    tokenizer_path: &'a str,
+    prompt: &'a str,
+    max_tokens: usize,
+    use_chat_template: bool,
+}
+
+#[cfg(feature = "rocm-worker")]
+async fn try_rocm_worker(
+    state: &AppState,
+    prompt: &str,
+    max_tokens: usize,
+    emit: Option<&(dyn Fn(String) -> Result<()> + Send + Sync)>,
+) -> (Result<GenerateResult>, bool) {
+    let executable = state.runtime_dir.join("rocm-worker");
+    let runtime = state.runtime_dir.join("rocm");
+    let model_path = state.default_model_path().to_string_lossy().into_owned();
+    let tokenizer_path = state
+        .default_tokenizer_path()
+        .to_string_lossy()
+        .into_owned();
+    let mut library_dirs = vec![runtime.clone()];
+    let mut pending_dirs = vec![runtime.clone()];
+    while let Some(parent) = pending_dirs.pop() {
+        if let Ok(entries) = std::fs::read_dir(parent) {
+            let children = entries
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| path.is_dir())
+                .collect::<Vec<_>>();
+            pending_dirs.extend(children.iter().cloned());
+            library_dirs.extend(children);
+        }
+    }
+    let request = RocmWorkerRequest {
+        protocol: 1,
+        model_path: &model_path,
+        tokenizer_path: &tokenizer_path,
+        prompt,
+        max_tokens,
+        use_chat_template: false,
+    };
+    let child = Command::new(&executable)
+        .env("GEMMA_ROCM_RUNTIME", &runtime)
+        .env("LD_LIBRARY_PATH", {
+            let old = std::env::var_os("LD_LIBRARY_PATH").unwrap_or_default();
+            let mut paths = library_dirs.clone();
+            paths.extend(std::env::split_paths(&old));
+            match std::env::join_paths(paths) {
+                Ok(paths) => paths,
+                Err(error) => {
+                    return (Err(anyhow::anyhow!("invalid library path: {error}")), false)
+                }
+            }
+        })
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("could not start {}: {e}", executable.display()));
+    let mut child = match child {
+        Ok(child) => child,
+        Err(error) => return (Err(error), false),
+    };
+    let input = match serde_json::to_string(&request) {
+        Ok(input) => input,
+        Err(error) => return (Err(error.into()), false),
+    };
+    let Some(mut stdin) = child.stdin.take() else {
+        return (Err(anyhow::anyhow!("worker stdin unavailable")), false);
+    };
+    if let Err(error) = stdin.write_all(input.as_bytes()).await {
+        let _ = child.kill().await;
+        return (Err(error.into()), false);
+    }
+    if let Err(error) = stdin.write_all(b"\n").await {
+        let _ = child.kill().await;
+        return (Err(error.into()), false);
+    }
+    drop(stdin);
+    let Some(stdout) = child.stdout.take() else {
+        return (Err(anyhow::anyhow!("worker stdout unavailable")), false);
+    };
+    let mut lines = BufReader::new(stdout).lines();
+    let mut emitted = false;
+    let mut response: Option<GenerateResult> = None;
+    loop {
+        let line = match lines.next_line().await {
+            Ok(Some(line)) => line,
+            Ok(None) => break,
+            Err(error) => {
+                let _ = child.kill().await;
+                return (Err(error.into()), emitted);
+            }
+        };
+        let message: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(message) => message,
+            Err(error) => {
+                let _ = child.kill().await;
+                return (
+                    Err(anyhow::anyhow!("invalid worker message: {error}")),
+                    emitted,
+                );
+            }
+        };
+        if message["protocol"] != 1 {
+            let _ = child.kill().await;
+            return (
+                Err(anyhow::anyhow!("unsupported ROCm worker protocol")),
+                emitted,
+            );
+        }
+        match message["event"].as_str() {
+            Some("token") => {
+                let Some(token) = message["text"].as_str() else {
+                    let _ = child.kill().await;
+                    return (
+                        Err(anyhow::anyhow!("ROCm worker token message has no text")),
+                        emitted,
+                    );
+                };
+                emitted = true;
+                if let Some(emit) = emit {
+                    if let Err(error) = emit(token.to_owned()) {
+                        let _ = child.kill().await;
+                        return (Err(error), emitted);
+                    }
+                }
+            }
+            Some("complete") => {
+                response = match serde_json::from_value(message["result"].clone()) {
+                    Ok(result) => Some(result),
+                    Err(error) => {
+                        return (
+                            Err(anyhow::anyhow!("invalid ROCm worker result: {error}")),
+                            emitted,
+                        )
+                    }
+                };
+            }
+            _ => return (Err(anyhow::anyhow!("unknown ROCm worker event")), emitted),
+        }
+    }
+    let status = match child.wait().await {
+        Ok(status) => status,
+        Err(error) => return (Err(error.into()), emitted),
+    };
+    if !status.success() {
+        return (
+            Err(anyhow::anyhow!("ROCm worker exited with {status}")),
+            emitted,
+        );
+    }
+    let Some(mut result) = response else {
+        return (
+            Err(anyhow::anyhow!(
+                "ROCm worker exited without a completion message"
+            )),
+            emitted,
+        );
+    };
+    if result.execution_provider != "ROCm" || result.is_mock {
+        return (
+            Err(anyhow::anyhow!("worker did not report real ROCm inference")),
+            emitted,
+        );
+    }
+    result.latency_ms = result.latency_ms.max(1);
+    (Ok(result), emitted)
 }
 
 fn mock_generate(prompt: &str, max_tokens: usize) -> GenerateResult {
@@ -90,6 +300,7 @@ async fn try_real_inference(
     max_tokens: usize,
     emit: Option<&(dyn Fn(String) -> Result<()> + Send + Sync)>,
 ) -> Result<GenerateResult> {
+    state.verify_default_model().await?;
     let start = Instant::now();
     let tok_path = state.default_tokenizer_path();
     let model_path = state.default_model_path();
@@ -318,12 +529,43 @@ pub async fn generate_stream(
         }
         return Ok(res);
     }
-
     let prompt = if opts.use_chat_template.unwrap_or(true) {
         apply_gemma_chat_template(&opts.prompt)
     } else {
         opts.prompt.clone()
     };
+    #[cfg(feature = "rocm-worker")]
+    {
+        if state
+            .rocm_disabled
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            try_real_inference(state, &prompt, max_tokens, Some(&emit)).await
+        } else {
+            let (rocm_result, emitted) =
+                try_rocm_worker(state, &prompt, max_tokens, Some(&emit)).await;
+            match rocm_result {
+                Ok(result) => Ok(result),
+                Err(rocm_error) => {
+                    state
+                        .rocm_disabled
+                        .store(true, std::sync::atomic::Ordering::Release);
+                    if emitted {
+                        Err(rocm_error)
+                    } else {
+                        try_real_inference(state, &prompt, max_tokens, Some(&emit))
+                            .await
+                            .map_err(|fallback| {
+                                anyhow::anyhow!(
+                                    "ROCm failed: {rocm_error}; WebGPU/CPU fallback failed: {fallback}"
+                                )
+                            })
+                    }
+                }
+            }
+        }
+    }
+    #[cfg(not(feature = "rocm-worker"))]
     try_real_inference(state, &prompt, max_tokens, Some(&emit)).await
 }
 

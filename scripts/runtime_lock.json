@@ -1,0 +1,46 @@
+{
+  "ort": "1.30.0",
+  "webgpu_ep": "0.3.0",
+  "rocm_ort": "1.22.1",
+  "rocm": "7.0",
+  "targets": {
+    "win32-x64-cuda": {
+      "packages": [
+        {"url":"https://files.pythonhosted.org/packages/3f/e2/626586334da2356be4a9f0fa9864a9fc6406c6b128887258de091ffbf1be/onnxruntime_gpu-1.30.0-cp311-cp311-win_amd64.whl","sha256":"fea66ebd743717de6f254955293b5f978825be7867c87a99c4a0ac1fe6f1d763"},
+        {"url":"https://files.pythonhosted.org/packages/84/20/f4d51697015cb1eb0fb027b19bcc8641b93144beaed4cd332979803f0a99/onnxruntime_ep_webgpu-0.3.0-py3-none-win_amd64.whl","sha256":"f25ed449a8f152176a20bc9b2f959a16511f16ff0f962a37979799d1b2d56bf7"},
+        {"url":"https://files.pythonhosted.org/packages/64/5b/aa91896f64444eff1dd7f189f4db05046c7f0ba08c0f531283c1c1aac581/nvidia_cuda_nvrtc-13.4.92-py3-none-win_amd64.whl","sha256":"6af7ac5372920f6a7a560d0699348560fe44cb52c1d722d6afd3119f8af948c4"},
+        {"url":"https://files.pythonhosted.org/packages/86/00/d5436004268f049214193659ebc36550b5ef3925c3d13b4cc980e13be6f5/nvidia_cuda_runtime-13.4.92-py3-none-win_amd64.whl","sha256":"08dca5e4aba480c2fd5b55075c0fa71b84ef9dcf0521f2d58baa14a803a7311c"},
+        {"url":"https://files.pythonhosted.org/packages/7b/cc/be7fe31058127336a66c88414a2ecc6beecf680baf85994a43eaf292b202/nvidia_cufft-12.4.0.43-py3-none-win_amd64.whl","sha256":"4ff7075f2d0b5f69291f70938d37a86ec632cbe5747184c74ba1f50f17accacc"},
+        {"url":"https://files.pythonhosted.org/packages/e2/d4/f59ab342b82ff05ff27d674acd470ba625d788bf71338f7da6c89669d6b9/nvidia_curand-10.4.4.72-py3-none-win_amd64.whl","sha256":"e0bce83e083ef25976ee74f59e8f067c15149a74538f1be6c2462e286e7c9c68"},
+        {"url":"https://files.pythonhosted.org/packages/87/6a/e55ff0ac26a5c6e2b21f41c9d04ad096b4ed6da593fba7e25845c61b0532/nvidia_cudnn_cu13-9.27.0.42-py3-none-win_amd64.whl","sha256":"7d96f634adafd55c72231eb0500ca77ab109ec8ebff7b33000b76e081bc4558e"},
+        {"url":"https://files.pythonhosted.org/packages/72/7c/c44bd7277afafed9de262a23baec4dc8dcf7ecbb1b9ecb228821442d1e9b/nvidia_nvjitlink-13.4.92-py3-none-win_amd64.whl","sha256":"b286f3a4f227a9363efdec263c7b91788cef1478d2b8a5fa8bab7f3e82ff82fd"}
+      ]
+    },
+    "linux-x64-cuda": {
+      "packages": [
+        {"url":"https://files.pythonhosted.org/packages/ea/71/b225bd559a718f6cefb058d4f4c4c95e556543f47d4be0e81819681ac347/onnxruntime_gpu-1.30.0-cp311-cp311-manylinux_2_28_x86_64.whl","sha256":"4fbf0c5d7b5fb99266c2e8a802e3e64af68bdc383e0f3c7349b985f1087eedaa"},
+        {"url":"https://files.pythonhosted.org/packages/97/9c/d37bc05c56c3d91d44585db7bebbf0f068ece5d01df5b3898449771d4bf2/onnxruntime_ep_webgpu-0.3.0-py3-none-manylinux_2_28_x86_64.whl","sha256":"865ce82d80319d7f259a4a65e66e32834f0f117db55ae4377868b4f28016e7bf"},
+        {"url":"https://files.pythonhosted.org/packages/56/9c/1342ebb460ce2afd014ec5a002adc99108e3c53a6b70f399cf64dd1f267d/nvidia_cuda_nvrtc-13.4.92-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl","sha256":"5ce8c97b00b232c4f50c8c4b5a3b68cafee08bdb82ea86f2052ff01d03194f4a"},
+        {"url":"https://files.pythonhosted.org/packages/98/8a/3431271f6344874b8f1ac03f16b3d679c91493f8da63f716160403e6d0a0/nvidia_cuda_runtime-13.4.92-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl","sha256":"9641f797da20ce1dd8e779b6e96d08cf9ba564cec8e8225458811ee26423f3a5"},
+        {"url":"https://files.pythonhosted.org/packages/76/bf/3fea3d1c6262bded26ae00e3106432d63235954965d7785f5051ac146651/nvidia_cufft-12.4.0.43-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl","sha256":"0e8385013596b112d29c9ce8c63dc575b308d77636c7169104e18714f03961a8"},
+        {"url":"https://files.pythonhosted.org/packages/07/73/3ee8e5b4cb891401e603ffd3a59b35c6afe785fd2de123afe7c7029603dc/nvidia_curand-10.4.4.72-py3-none-manylinux_2_27_x86_64.whl","sha256":"25c3457ae7a224fdd484dab90b0fc5dc0e842fab5db3012afa4a5bd2af4eb7e5"},
+        {"url":"https://files.pythonhosted.org/packages/af/75/96ea5c5368eb595c39d629cde08a66227a864e71ccb0e593add2612bb952/nvidia_cudnn_cu13-9.27.0.42-py3-none-manylinux_2_27_x86_64.whl","sha256":"9677e76f21862eb5da7ee5ed69d544738b2d8b5c3ce7e5ec125c5592e6cdbdc8"},
+        {"url":"https://files.pythonhosted.org/packages/1d/6b/eef7a9e32872b8f41e145bf10cddc9af26e153c338852811fe9a9baddf9e/nvidia_nvjitlink-13.4.92-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl","sha256":"e0391f24ed94ec879b84e3da4d4ec320c879aff681f2c7a638462f7199284323"},
+        {"url":"https://files.pythonhosted.org/packages/eb/1b/adc70acf3fde509b1f0ca29d1c0e8d9b00aaecd871f8cf877257c8b68d9c/nvidia_cublas-13.8.1.7-py3-none-manylinux_2_27_x86_64.whl","sha256":"c11a27fd4379510e5b1f84b367a2514d1e52fe5cc13442117a0e0a1addee3cf2"}
+      ]
+    },
+    "macos-arm64-coreml": {
+      "packages": [
+        {"url":"https://files.pythonhosted.org/packages/73/b6/e2fa6dfc8c3cd19639d452c3120fb0e02f5176b4e24ecabb24b5362be725/onnxruntime-1.30.0-cp311-cp311-macosx_14_0_arm64.whl","sha256":"f36c87ec504f4f328e968ee322e4ba9682abe66280b3425625afcbed5333fed7"},
+        {"url":"https://files.pythonhosted.org/packages/0f/77/cfdbe4900a5a38a8b49de9b10254e3ce77f164d246fa3126db7cb7dbc713/onnxruntime_ep_webgpu-0.3.0-py3-none-macosx_14_0_universal2.whl","sha256":"facdb3ad9933cb4504c579c2085c9be1644b6912ee74d7c9a7281046d7e7155a"}
+      ]
+    },
+    "linux-x64-rocm": {
+      "packages": [
+        {"url":"https://files.pythonhosted.org/packages/4f/2e/4c96278a99140d0307ccda6fd51e6e9d1ca7c9f6fdd1fa96ff375acfc713/onnxruntime-1.30.0-cp311-cp311-manylinux_2_28_x86_64.whl","sha256":"fd54b314ea385bcecac69ab431f020ba503e3878dad4ebb645fec5a24b041242"},
+        {"url":"https://repo.radeon.com/rocm/manylinux/rocm-rel-7.0/onnxruntime_rocm-1.22.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl","sha256":"953a4e152f944391798880d88ea3d887c1109cfdc622815d81c07e2e1abc080e"},
+        {"url":"https://files.pythonhosted.org/packages/97/9c/d37bc05c56c3d91d44585db7bebbf0f068ece5d01df5b3898449771d4bf2/onnxruntime_ep_webgpu-0.3.0-py3-none-manylinux_2_28_x86_64.whl","sha256":"865ce82d80319d7f259a4a65e66e32834f0f117db55ae4377868b4f28016e7bf"}
+      ]
+    }
+  }
+}
