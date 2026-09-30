@@ -16,6 +16,7 @@ pub struct BenchResult {
     pub avg_tokens_per_sec: f64,
     pub total_tokens: usize,
     pub is_mock: bool,
+    pub execution_provider: String,
     pub timestamp: String,
 }
 
@@ -27,6 +28,7 @@ pub async fn run_bench(state: &AppState, iterations: usize) -> anyhow::Result<Be
     let mut total_tokens = 0;
     let mut total_latency_ms: f64 = 0.0;
     let mut is_mock = false;
+    let mut execution_provider = "CPU".to_string();
 
     for _ in 0..iterations {
         let start = Instant::now();
@@ -44,6 +46,7 @@ pub async fn run_bench(state: &AppState, iterations: usize) -> anyhow::Result<Be
         total_latency_ms += elapsed;
         total_tokens += res.generated_tokens;
         is_mock = res.is_mock;
+        execution_provider = res.execution_provider;
     }
 
     // iterations > 0 is guaranteed by the early bail above
@@ -68,6 +71,7 @@ pub async fn run_bench(state: &AppState, iterations: usize) -> anyhow::Result<Be
         avg_tokens_per_sec: avg_tps,
         total_tokens,
         is_mock,
+        execution_provider,
         timestamp: Utc::now().to_rfc3339(),
     })
 }

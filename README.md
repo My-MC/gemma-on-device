@@ -204,19 +204,44 @@ bun run check:ort             # rustc/cargo/ort/models/tauri-cli diagnostics
 ```bash
 bun run build                 # vite only
 bun run tauri build           # Tauri bundle (target/release/bundle, workspace root)
-# With execution provider
-bun run tauri build -- --features cuda
+# Separate desktop editions (requires a matching, SHA256-pinned runtime bundle;
+# see `runtime-artifacts/` below)
+bun run tauri:cuda       # Windows/Linux: CUDA → WebGPU → CPU
+bun run tauri:migraphx   # Windows/Linux: MIGraphX → WebGPU → CPU
+bun run tauri:coreml     # macOS Intel/Apple Silicon: CoreML → WebGPU → CPU
 ```
 
-On Apple Silicon Macs, `bun run tauri dev` and `bun run tauri build` include
-CoreML automatically. Inference requests CoreML's `CPUAndGPU` compute mode,
-uses MLProgram with FP16 GPU accumulation, and falls back to CPU for graph nodes
-that CoreML cannot execute. The community Gemma ONNX graph contains dynamic
-operations, so current profiling shows partial GPU offload rather than
-GPU-exclusive execution. Compiled CoreML graphs
-are cached in `models/.coreml-cache/` (or the app data model directory).
-Set `GEMMA_COREML_PROFILE=1` when launching the app to log CoreML's per-operator
-hardware assignment and estimated execution time for GPU diagnostics.
+Each edition first creates a session with its primary EP. If registration or
+session creation fails, it tries the native WebGPU plugin and then CPU. ORT can
+still assign unsupported graph nodes to CPU within a successful GPU session;
+the UI reports the selected session EP and does not imply that every node ran
+on the GPU.
+
+Edition builds target Windows x86_64, Linux x86_64, and macOS x86_64/arm64.
+They read `runtime-artifacts/<platform>-<arch>/<edition>/` and require
+a `runtime-manifest.json` containing the edition, target, ONNX Runtime version
+`1.30.0`, WebGPU EP version `0.3.0`, and SHA256 for every packaged runtime file.
+Put the matching ORT core, WebGPU plugin, primary EP libraries, and all
+redistributable dependencies in that directory. The build script verifies the
+manifest and hashes before copying files into the Tauri bundle. Set
+`GEMMA_RUNTIME_ARTIFACTS_DIR` to use a different artifact root. The GPU driver
+must be installed on the host. Linux and macOS provider dependencies must have
+relative loader paths (`$ORIGIN` / `@loader_path`) so libraries in the resource
+directory can find their sibling dependencies.
+
+The manifest keys are `edition`, `target`, `ort_version`, `webgpu_ep_version`,
+`primary_ep_version`, and `files`; `files` maps each relative runtime path to its lowercase SHA256. CUDA and MIGraphX manifests must include their matching provider shared library.
+Keep DLL/SO/dylib dependencies beside the EP libraries so the platform loader
+can resolve them from the bundle.
+
+MIGraphX bundles use AMD's ONNX Runtime plugin EP built against the pinned ORT
+1.30 ABI, together with the matching ROCm/HIP/MIGraphX runtime. The upstream
+[AMD EP build](https://github.com/onnxruntime/onnxruntime-ep-amdgpu) supports
+Windows and Linux builds. The Windows edition requires the AMD plugin's source
+build path and must be validated on an AMD GPU before distribution. macOS
+CoreML bundles must include an ORT build with CoreML enabled for the target
+architecture. The standard CI builds the default CPU app; hardware EP smoke
+tests require the corresponding self-hosted GPU runners.
 
 Thresholds: desktop 5 tok/s / mobile 2 tok/s (INT4).
 
@@ -230,23 +255,22 @@ must be present at runtime or `ort::init()` fails.
 Resolution order used by `src-tauri/src/lib.rs:init_ort()`:
 
 1. `ORT_DYLIB_PATH` env var (explicit override, also picked up by `ort`).
-2. `<exe-dir>/onnxruntime.dll` — where CI stages it via
+2. `<resource-dir>/ort-runtime/onnxruntime.dll` — GPU edition bundle location.
+3. `<exe-dir>/onnxruntime.dll` — where CI stages it via
    `.github/workflows/ci.yml` and where the Windows-only
    `src-tauri/tauri.windows.conf.json` `bundle.resources` places it in installed
-   bundles. Non-Windows builds need no DLL (`ort` links statically and no
-   resource mapping exists outside Windows).
-3. `ort::init()` fallback (lets `ort` use its own DLL search rules).
+   CPU bundles.
+4. `ort::init()` fallback (lets `ort` use its own DLL search rules).
 
 For a manual Windows desktop build, place the matching DLL next to the binary
-or point `ORT_DYLIB_PATH` at it. The version must match the `ort` wheel —
-`ort 2.0.0-rc.13` vendors ONNX Runtime 1.22.0:
+or point `ORT_DYLIB_PATH` at it. `ort 2.0.0-rc.13` is built against ONNX Runtime 1.28; edition bundles use
+the ABI-compatible 1.30 runtime for the WebGPU EP 0.3.0:
 
 ```bash
 # x64
-curl -fsSL -o /tmp/ort.zip https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-win-x64-1.22.0.zip
-echo '174c616efc0271194488642a72f1a514e01487da4dfe84c49296d66e40ebe0da  /tmp/ort.zip' | sha256sum -c -
-unzip -j /tmp/ort.zip 'onnxruntime-win-x64-1.22.0/lib/onnxruntime.dll' -d src-tauri/target/release/ 2>/dev/null \
-  || unzip -j /tmp/ort.zip 'onnxruntime-win-x64-1.22.0/lib/onnxruntime.dll' -d target/release/
+curl -fsSL -o /tmp/ort.zip https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-win-x64-1.30.0.zip
+echo 'c6ba983baf5681af108599675d2a89c2d145512d02de28aed0bff177cd0ba949  /tmp/ort.zip' | sha256sum -c -
+unzip -j /tmp/ort.zip 'onnxruntime-win-x64-1.30.0/lib/onnxruntime.dll' -d target/release/
 bun run tauri build -- --features load-dynamic
 ```
 
@@ -291,12 +315,11 @@ The first launch has no bundled model; use the in-app download button to place
 the INT4 model in the app sandbox. Allow about 1.2 GB of storage for model files
 and 2–3 GB of working memory during inference.
 
-Execution providers in `src-tauri/Cargo.toml:31`:
+Execution providers in `src-tauri/Cargo.toml`:
 
-- Win: `directml` / `cuda` / `tensorrt`
-- Apple Silicon Mac: `coreml` is enabled automatically (GPU + CPU fallback)
-- Intel Mac: `coreml` (explicit Cargo feature)
-- Linux: `cuda`
+- Windows/Linux CUDA edition: `desktop-cuda`
+- Windows/Linux AMD edition: `desktop-migraphx` (AMD plugin EP)
+- Intel/Apple Silicon macOS edition: `desktop-coreml`
 - Android: `nnapi` / `xnnpack`
 - iOS: `coreml` is enabled automatically (GPU + CPU fallback)
 
@@ -324,6 +347,7 @@ Defined in `src-tauri/src/lib.rs:1`:
 | `bun run export:onnx` | `scripts/export_onnx.py` (`optimum-cli export onnx --quant int4`) |
 | `bun run bench` | `scripts/bench.ts` CLI bench |
 | `bun run check:ort` | `scripts/check_ort.ts` environment diagnostics |
+| `bun run tauri:cuda` / `tauri:migraphx` / `tauri:coreml` | Stage a hash-verified runtime bundle and build the selected desktop edition |
 
 ## Development Workflow
 

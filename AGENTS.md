@@ -10,7 +10,7 @@ This file defines operational rules for agents/contributors in `gemma-on-device`
 
 ## Tech Stack (Fixed)
 
-- **Rust**: `ort =2.0.0-rc.13` (`half` feature, EPs: `cuda`/`coreml`/`directml`/`nnapi`/`tensorrt`/`xnnpack`), `tokenizers 0.22`, `tauri 2.12`, `tauri-plugin-opener 2.7`, `tokio full`, `reqwest 0.12` (`rustls-tls` + `stream`), `anyhow`, `ndarray 0.16`
+- **Rust**: `ort =2.0.0-rc.13` (`half` feature; desktop editions: CUDA/MIGraphX/CoreML with WebGPU plugin fallback), `tokenizers 0.22`, `tauri 2.12`, `tauri-plugin-opener 2.7`, `tokio full`, `reqwest 0.12` (`rustls-tls` + `stream`), `anyhow`, `ndarray 0.16`
 - **JS**: `Bun 1.3.14` (package manager + runtime), `React 19`, `Vite 7.3.6`, `TypeScript 5.8`, `@tauri-apps/api 2.12`, `@tauri-apps/plugin-opener 2.7`, `@tauri-apps/cli 2.12`
 - **Build**: `vite.config.ts` uses `port 1420 strictPort`, `host TAURI_DEV_HOST`, `frontendDist ../dist`; `tauri.conf.json` uses `beforeDevCommand: bun run dev`
 - **JS execution**: `package.json:scripts` call `vite` directly. Run with `bun run dev` / `bun run build`. Do NOT use `bunx --bun vite`.
@@ -94,7 +94,7 @@ Follow global `~/.config/opencode/AGENTS.md`:
 
 ## Mobile
 
-- EPs in `src-tauri/Cargo.toml:31` are enabled via `cargo tauri build -- --features cuda`. Default is CPU.
+- Desktop editions are built with `bun run tauri:cuda`, `bun run tauri:migraphx`, or `bun run tauri:coreml`; each expects a SHA256-locked runtime under `runtime-artifacts/`. Default remains CPU.
 - Android: `cargo ndk`, `aarch64-linux-android` etc.; iOS: `aarch64-apple-ios`
 - 1B INT4 is 1.2GB + 2-3GB RAM at inference → 4GB+ device recommended. 3n-E2B is mobile-optimized.
 
