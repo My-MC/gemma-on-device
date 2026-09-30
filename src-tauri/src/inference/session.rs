@@ -32,8 +32,8 @@ pub struct InferenceSession {
 #[allow(dead_code)]
 const APPLE_SILICON_COREML: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
 
-/// Execution provider selected first for this build. Unsupported CoreML nodes
-/// continue on ONNX Runtime's CPU provider.
+/// First execution provider registered for this build. Execution providers
+/// are tried in priority order and unsupported nodes fall back to CPU.
 #[allow(dead_code)]
 pub fn preferred_execution_provider() -> &'static str {
     if APPLE_SILICON_COREML || cfg!(feature = "coreml") {
@@ -42,6 +42,8 @@ pub fn preferred_execution_provider() -> &'static str {
         "TensorRT"
     } else if cfg!(feature = "cuda") {
         "CUDA"
+    } else if cfg!(feature = "webgpu") {
+        "WebGPU"
     } else if cfg!(feature = "directml") {
         "DirectML"
     } else if cfg!(feature = "nnapi") {
@@ -183,6 +185,14 @@ pub fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Session> {
             ort::ep::TensorRT::default().build(),
             #[cfg(feature = "cuda")]
             ort::ep::CUDA::default().build(),
+            #[cfg(all(feature = "webgpu", target_os = "windows"))]
+            ort::ep::WebGPU::default()
+                .with_dawn_backend_type(ort::ep::webgpu::DawnBackendType::D3D12)
+                .build(),
+            #[cfg(all(feature = "webgpu", target_os = "linux"))]
+            ort::ep::WebGPU::default()
+                .with_dawn_backend_type(ort::ep::webgpu::DawnBackendType::Vulkan)
+                .build(),
             #[cfg(feature = "directml")]
             ort::ep::DirectML::default().build(),
             #[cfg(any(feature = "coreml", all(target_os = "macos", target_arch = "aarch64")))]

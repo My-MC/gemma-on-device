@@ -116,12 +116,10 @@ async fn download_model(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Ensure ort is initialized once at startup (CPU default)
-    init_ort();
-
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            init_ort(app.handle());
             // Mobile: use app_data_dir (sandboxed, persistent)
             // Desktop: prefer project `models/` for dev if it exists, else app_data_dir
             let model_dir = resolve_model_dir_for_app(app.handle());
@@ -160,7 +158,7 @@ pub fn run() {
 /// 3. `ort::init()` fallback (lets `ort` use its own DLL search rules, which
 ///    is enough when the DLL is on `PATH` or in the working directory).
 #[cfg(target_os = "windows")]
-fn init_ort() {
+fn init_ort(_app: &tauri::AppHandle) {
     // `ort::init_from` only exists when the `load-dynamic` feature is on;
     // without it `ort` is statically linked (or fails at link time) and
     // `ort::init()` is the only init entry point.
@@ -172,8 +170,13 @@ fn init_ort() {
         if let Ok(p) = std::env::var("ORT_DYLIB_PATH") {
             candidates.push(PathBuf::from(p));
         }
+        if let Ok(dir) = _app.path().resource_dir() {
+            candidates.push(dir.join("ort-gpu").join("onnxruntime.dll"));
+            candidates.push(dir.join("onnxruntime.dll"));
+        }
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
+                candidates.push(dir.join("ort-gpu").join("onnxruntime.dll"));
                 candidates.push(dir.join("onnxruntime.dll"));
             }
         }
@@ -199,8 +202,43 @@ fn init_ort() {
     let _ = ort::init().commit();
 }
 
-#[cfg(not(target_os = "windows"))]
-fn init_ort() {
+#[cfg(all(target_os = "linux", feature = "load-dynamic"))]
+fn init_ort(app: &tauri::AppHandle) {
+    use std::path::PathBuf;
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(path) = std::env::var("ORT_DYLIB_PATH") {
+        candidates.push(PathBuf::from(path));
+    }
+    if let Ok(dir) = app.path().resource_dir() {
+        candidates.push(dir.join("ort-gpu").join("libonnxruntime.so"));
+        candidates.push(dir.join("libonnxruntime.so"));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("ort-gpu").join("libonnxruntime.so"));
+        }
+    }
+
+    if let Some(path) = candidates.into_iter().find(|path| path.exists()) {
+        match ort::init_from(path.clone()) {
+            Ok(builder) => {
+                if builder.commit() {
+                    return;
+                }
+                eprintln!("[ort] init_from({}) returned false.", path.display());
+            }
+            Err(e) => eprintln!("[ort] init_from({}) failed: {e}.", path.display()),
+        }
+    }
+    let _ = ort::init().commit();
+}
+
+#[cfg(all(
+    not(target_os = "windows"),
+    not(all(target_os = "linux", feature = "load-dynamic"))
+))]
+fn init_ort(_app: &tauri::AppHandle) {
     let _ = ort::init().commit();
 }
 
