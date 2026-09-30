@@ -11,14 +11,15 @@ A Tauri application to validate whether Rust `ort` (ONNX Runtime) can run Gemma 
 | --- | --- | --- | --- |
 | Rust | `ort` | `2.0.0-rc.13` (`half` feature) | ONNX Runtime wrapper, CPU by default, EPs switched via Cargo features |
 | Rust | `tokenizers` | `0.22` | Gemma SentencePiece JSON (`tokenizer.json`) |
-| Rust | `tauri` | `2.11.5` + `tauri-build 2.6.3` | Desktop / mobile Rust backend |
+| Rust | `tauri` | `2.12` + `tauri-build 2.7` | Desktop / mobile Rust backend |
 | Rust | `tokio` `futures` `reqwest` `tokio-util` | - | Async runtime + in-app download (`rustls-tls`) |
 | Rust | `serde` `anyhow` `ndarray` | - | IPC, errors, tensor creation (`[1, seq_len]` shape) |
 | JS runtime | `Bun` | `1.3.14` | Package manager and runtime (Node-compatible, `package.json:scripts` run `vite` via `bun run`) |
 | Frontend | `React` | `19.1.0` + `react-dom 19.1.0` | UI |
 | Frontend | `Vite` | `7.3.6` + `@vitejs/plugin-react 4.7` | Build, `devUrl http://localhost:1420` |
 | Frontend | `TypeScript` | `5.8.3` | Types |
-| Tauri JS | `@tauri-apps/api` `cli` `plugin-opener` | `2.11` | `invoke` / `listen` / `emit` |
+| Tauri JS | `@tauri-apps/api` `cli` | `2.12` | `invoke` / `listen` / `emit` |
+| Tauri JS plugin | `@tauri-apps/plugin-opener` | `2.7` | Open URLs and files |
 | Models | Gemma 3 1B INT4 / 3n E2B INT4 | `onnx-community` | Community ONNX, INT4 quantized |
 
 **JS execution**: `package.json:scripts` call `vite` directly and are run via `bun run dev` / `bun run build`. Do not use `bunx --bun vite`.
