@@ -160,8 +160,8 @@ CI will enforce the same gates (`.github/workflows` upcoming). A PR with failing
 
 ## Mobile CI packages
 
-- The CI workflow builds Android and iOS packages on pushes to `master` and manual runs; pull requests keep the frontend and desktop checks.
-- Android requires repository secrets `ANDROID_KEY_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and `ANDROID_STORE_PASSWORD`. Missing values skip the Android job and are reported in the workflow summary. The job creates signed ARM64 APK and AAB artifacts.
+- The CI workflow builds Android and iOS packages on pushes to `master`, pull requests, and manual runs.
+- Android requires repository secrets `ANDROID_KEY_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and `ANDROID_STORE_PASSWORD`. Missing values skip the Android job and are reported in the workflow summary. GitHub withholds repository secrets from fork pull requests, so Android signing is skipped for those runs. The job creates signed ARM64 APK and AAB artifacts when the secrets are available.
 - iOS creates an unsigned ARM64 release IPA with `tauri ios build --no-sign`; AltStore Classic signs it during sideloading, so no Apple signing secrets are required. The IPA artifact is retained for seven days.
 
 ## Verification (CI Minimum)

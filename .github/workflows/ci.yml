@@ -91,7 +91,6 @@ jobs:
 
   android-signing:
     name: Check Android signing configuration
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     outputs:
       enabled: ${{ steps.check.outputs.enabled }}
@@ -204,7 +203,6 @@ jobs:
   ios:
     name: iOS (AltStore Classic unsigned IPA)
     needs: frontend
-    if: github.event_name != 'pull_request'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7

@@ -280,9 +280,9 @@ bun run tauri ios build --target aarch64 --features coreml --no-sign --ci
 
 ### Mobile CI packages
 
-The `CI` workflow builds mobile packages on pushes to `master` and manual runs. Android creates signed ARM64 APK and AAB artifacts when all four Android signing repository secrets are configured: `ANDROID_KEY_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and `ANDROID_STORE_PASSWORD`. Otherwise, the Android job is skipped with the missing setup described in the run summary.
+The `CI` workflow builds mobile packages on pushes to `master`, pull requests, and manual runs. Android creates signed ARM64 APK and AAB artifacts when all four Android signing repository secrets are available: `ANDROID_KEY_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and `ANDROID_STORE_PASSWORD`. Otherwise, the Android job is skipped with the missing setup described in the run summary. GitHub does not pass repository secrets to workflows triggered by fork pull requests, so Android signing is skipped for those runs.
 
-iOS creates an unsigned ARM64 release IPA without signing secrets. Download the `gemma-on-device-ios-altstore-classic` artifact, then import the IPA with AltStore Classic so AltStore can sign and sideload it. Artifacts are retained for seven days. Pull requests continue to run the existing desktop and frontend checks.
+iOS creates an unsigned ARM64 release IPA without signing secrets. Download the `gemma-on-device-ios-altstore-classic` artifact, then import the IPA with AltStore Classic so AltStore can sign and sideload it. Artifacts are retained for seven days.
 
 The generated Xcode project lives in `src-tauri/gen/apple`. Set
 `bundle.iOS.developmentTeam` in `src-tauri/tauri.conf.json` to the team reported
