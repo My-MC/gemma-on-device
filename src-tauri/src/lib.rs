@@ -282,8 +282,12 @@ fn init_ort(app: &tauri::AppHandle) {
     }
     if let Some(path) = candidates.into_iter().find(|path| path.exists()) {
         match ort::init_from(path.clone()) {
-            Ok(builder) if builder.commit() => return,
-            Ok(_) => eprintln!("[ort] init_from({}) returned false.", path.display()),
+            Ok(builder) => {
+                if builder.commit() {
+                    return;
+                }
+                eprintln!("[ort] init_from({}) returned false.", path.display());
+            }
             Err(error) => eprintln!("[ort] init_from({}) failed: {error}.", path.display()),
         }
     }
