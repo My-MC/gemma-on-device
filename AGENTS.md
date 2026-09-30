@@ -106,6 +106,7 @@ Agents may work in a Git worktree. Each worktree is an isolated working director
 
 ## Mobile
 
+- Desktop editions use `bun run tauri:cuda`, `bun run tauri:migraphx`, or `bun run tauri:coreml`; runtime bundles are SHA256-locked and loaded from the GitHub Release selected by `GEMMA_RUNTIME_RELEASE_TAG`. CI uploads each built edition as a separate 7-day Actions artifact. Default remains CPU.
 - Generated Android/iOS projects are ignored and initialized with `bun run tauri android init` / `bun run tauri ios init`.
 - Android: `cargo ndk`, `aarch64-linux-android` etc.; iOS: `aarch64-apple-ios`
 - Mobile providers (`nnapi`, `xnnpack`, `coreml`) require explicit Cargo features; CoreML is not automatically enabled. iOS config sets minimum version 15.1 and a development team that must match the contributor's signing setup.

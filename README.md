@@ -226,6 +226,8 @@ bun run check:ort             # rustc/cargo/ort/models/tauri-cli diagnostics
 
 ### Build
 
+Desktop editions use `bun run tauri:cuda`, `bun run tauri:migraphx`, and `bun run tauri:coreml`. Each selects its primary execution provider and falls back to WebGPU, then CPU. Runtime archives are downloaded from the GitHub Release named by the `GEMMA_RUNTIME_RELEASE_TAG` Actions variable, verified by SHA256, and unpacked using the `runtime-manifest.json` contract. CI builds each configured edition and uploads separate 7-day Actions artifacts. See the runtime bundle section below for exact asset names.
+
 ```bash
 bun run build                 # TypeScript check + Vite frontend build
 bun run tauri build           # Tauri bundle (target/release/bundle, workspace root)
