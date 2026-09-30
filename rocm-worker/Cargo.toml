@@ -1,0 +1,15 @@
+[package]
+name = "gemma-rocm-worker"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+anyhow = "1"
+ort = { version = "=2.0.0-rc.10", default-features = false, features = ["std", "ndarray", "rocm", "load-dynamic"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokenizers = "=0.23.1"
+
+[workspace]

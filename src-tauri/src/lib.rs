@@ -1,9 +1,9 @@
 mod inference;
 
 #[cfg(any(
-    all(feature = "cuda", feature = "migraphx"),
     all(feature = "cuda", feature = "coreml"),
-    all(feature = "migraphx", feature = "coreml")
+    all(feature = "cuda", feature = "rocm-worker"),
+    all(feature = "coreml", feature = "rocm-worker")
 ))]
 compile_error!("select exactly one desktop primary execution provider feature");
 
@@ -202,7 +202,10 @@ fn init_ort(_app: &tauri::AppHandle) {
 
 #[cfg(all(target_os = "windows", feature = "load-dynamic"))]
 fn add_runtime_dll_directory(path: &std::path::Path) {
-    use std::{os::windows::ffi::OsStrExt, sync::OnceLock};
+    use std::{
+        os::windows::ffi::OsStrExt,
+        sync::{Mutex, OnceLock},
+    };
 
     #[link(name = "kernel32")]
     extern "system" {
@@ -210,23 +213,47 @@ fn add_runtime_dll_directory(path: &std::path::Path) {
         fn AddDllDirectory(new_directory: *const u16) -> *mut std::ffi::c_void;
     }
 
-    static DLL_DIRECTORY_COOKIE: OnceLock<usize> = OnceLock::new();
+    static DLL_DIRECTORY_COOKIES: OnceLock<Mutex<Vec<(String, usize)>>> = OnceLock::new();
     if !path.is_dir() {
         return;
     }
-    let mut wide_path = path.as_os_str().encode_wide().collect::<Vec<_>>();
-    wide_path.push(0);
-    let cookie = DLL_DIRECTORY_COOKIE.get_or_init(|| unsafe {
-        // DEFAULT_DIRS (0x1000) plus USER_DIRS (0x400) lets Windows resolve
-        // provider dependencies beside the packaged runtime libraries.
-        let _ = SetDefaultDllDirectories(0x1400);
-        AddDllDirectory(wide_path.as_ptr()) as usize
-    });
-    if *cookie == 0 {
-        eprintln!(
-            "[ort] failed to add runtime dependency directory: {}",
-            path.display()
-        );
+    let cookies = DLL_DIRECTORY_COOKIES.get_or_init(|| Mutex::new(Vec::new()));
+    let mut directories = vec![path.to_path_buf()];
+    let mut pending = vec![path.to_path_buf()];
+    while let Some(parent) = pending.pop() {
+        if let Ok(entries) = std::fs::read_dir(parent) {
+            let children = entries
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|entry| entry.is_dir())
+                .collect::<Vec<_>>();
+            pending.extend(children.iter().cloned());
+            directories.extend(children);
+        }
+    }
+    for directory in directories {
+        let name = directory.to_string_lossy().into_owned();
+        let Ok(mut loaded) = cookies.lock() else {
+            return;
+        };
+        if loaded.iter().any(|(existing, _)| existing == &name) {
+            continue;
+        }
+        let mut wide_path = directory.as_os_str().encode_wide().collect::<Vec<_>>();
+        wide_path.push(0);
+        let cookie = unsafe {
+            // DEFAULT_DIRS plus USER_DIRS lets Windows resolve bundled dependencies.
+            let _ = SetDefaultDllDirectories(0x1400);
+            AddDllDirectory(wide_path.as_ptr()) as usize
+        };
+        if cookie == 0 {
+            eprintln!(
+                "[ort] failed to add runtime dependency directory: {}",
+                directory.display()
+            );
+        } else {
+            loaded.push((name, cookie));
+        }
     }
 }
 
@@ -234,6 +261,9 @@ fn add_runtime_dll_directory(path: &std::path::Path) {
 fn init_ort(app: &tauri::AppHandle) {
     use std::path::PathBuf;
 
+    if let Ok(resources) = app.path().resource_dir() {
+        preload_runtime_dependencies(&resources.join("ort-runtime"));
+    }
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Ok(path) = std::env::var("ORT_DYLIB_PATH") {
         candidates.push(PathBuf::from(path));
@@ -260,6 +290,81 @@ fn init_ort(app: &tauri::AppHandle) {
         }
     }
     let _ = ort::init().commit();
+}
+
+#[cfg(all(target_os = "linux", feature = "load-dynamic"))]
+fn preload_runtime_dependencies(runtime_dir: &std::path::Path) {
+    use std::{
+        ffi::CString,
+        sync::{Mutex, OnceLock},
+    };
+
+    #[link(name = "dl")]
+    extern "C" {
+        fn dlopen(filename: *const std::ffi::c_char, flags: i32) -> *mut std::ffi::c_void;
+    }
+
+    static LIBRARIES: OnceLock<Mutex<Vec<(String, usize)>>> = OnceLock::new();
+    let Some(libraries) = LIBRARIES.get_or_init(|| Mutex::new(Vec::new())).lock().ok() else {
+        return;
+    };
+    let mut pending = Vec::new();
+    let mut directories = vec![runtime_dir.to_path_buf()];
+    while let Some(directory) = directories.pop() {
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if path.file_name().is_some_and(|name| name != "rocm") {
+                    directories.push(path);
+                }
+            } else if path
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().contains(".so"))
+            {
+                pending.push(path);
+            }
+        }
+    }
+    drop(libraries);
+    pending.sort();
+    let mut loaded = Vec::new();
+    loop {
+        let mut deferred = Vec::new();
+        let mut progress = false;
+        for path in pending {
+            let name = path.to_string_lossy().into_owned();
+            if LIBRARIES
+                .get()
+                .and_then(|items| items.lock().ok())
+                .is_some_and(|items| items.iter().any(|(old, _)| old == &name))
+            {
+                continue;
+            }
+            let Ok(filename) = CString::new(name.clone()) else {
+                continue;
+            };
+            // Lazy global loading makes extracted NVIDIA libraries available to ORT and its providers.
+            let handle = unsafe { dlopen(filename.as_ptr(), 0x101) };
+            if handle.is_null() {
+                deferred.push(path);
+            } else {
+                loaded.push((name, handle as usize));
+                progress = true;
+            }
+        }
+        if !progress || deferred.is_empty() {
+            break;
+        }
+        pending = deferred;
+    }
+    if let Some(items) = LIBRARIES.get() {
+        if let Ok(mut items) = items.lock() {
+            items.extend(loaded);
+        }
+    }
 }
 
 #[cfg(all(target_os = "macos", feature = "load-dynamic"))]

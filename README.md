@@ -204,61 +204,37 @@ bun run check:ort             # rustc/cargo/ort/models/tauri-cli diagnostics
 ```bash
 bun run build                 # vite only
 bun run tauri build           # Tauri bundle (target/release/bundle, workspace root)
-# Separate desktop editions (requires a matching, SHA256-pinned runtime bundle;
-# see `runtime-artifacts/` below)
-bun run tauri:cuda       # Windows/Linux: CUDA → WebGPU → CPU
-bun run tauri:migraphx   # Windows/Linux: MIGraphX → WebGPU → CPU
-bun run tauri:coreml     # macOS Intel/Apple Silicon: CoreML → WebGPU → CPU
+# Each edition downloads SHA256-locked upstream wheels and stages native libraries.
+bun run tauri:cuda       # Windows/Linux x64: CUDA → WebGPU → CPU
+bun run tauri:rocm       # Linux x64: ROCm worker → WebGPU → CPU
+bun run tauri:coreml     # macOS 14+ Apple Silicon: CoreML → WebGPU → CPU
 ```
 
-Each edition first creates a session with its primary EP. If registration or
-session creation fails, it tries the native WebGPU plugin and then CPU. ORT can
-still assign unsupported graph nodes to CPU within a successful GPU session;
-the UI reports the selected session EP and does not imply that every node ran
-on the GPU.
+CUDA and CoreML use official ONNX Runtime and WebGPU wheels pinned in
+`scripts/runtime_lock.json`. `scripts/prepare_runtime.py` verifies each wheel,
+extracts native libraries and notices, and creates a SHA256 manifest under
+`runtime-artifacts/`. The bundle builder rechecks every staged file. Local builds
+need Python 3.12 and Bun; CI prepares all runtime editions in the same workflow
+and uploads four separate 7-day artifacts. No project GitHub Release is used as
+a runtime source.
 
-Edition builds target Windows x86_64, Linux x86_64, and macOS x86_64/arm64.
-They read `runtime-artifacts/<platform>-<arch>/<edition>/` and require
-a `runtime-manifest.json` containing the edition, target, ONNX Runtime version
-`1.30.0`, WebGPU EP version `0.3.0`, and SHA256 for every packaged runtime file.
-Put the matching ORT core, WebGPU plugin, primary EP libraries, and all
-redistributable dependencies in that directory. The build script verifies the
-manifest and hashes before copying files into the Tauri bundle. Set
-`GEMMA_RUNTIME_ARTIFACTS_DIR` to use a different artifact root. The GPU driver
-must be installed on the host. Linux and macOS provider dependencies must have
-relative loader paths (`$ORIGIN` / `@loader_path`) so libraries in the resource
-directory can find their sibling dependencies.
+CUDA targets Windows/Linux x64 with ONNX Runtime 1.30.0, CUDA 13, and cuDNN 9.
+Linux bundles include the pinned NVIDIA user-space wheels. Windows needs the
+matching NVIDIA CUDA/cuDNN runtime DLLs available on the host; the CUDA driver
+is always a host prerequisite. CoreML targets macOS 14 or newer on Apple
+Silicon. The GPU driver or operating-system GPU framework remains host supplied.
 
-CI downloads edition runtime archives from a GitHub Release whose tag is set
-in the repository Actions variable `GEMMA_RUNTIME_RELEASE_TAG`. Each archive
-must contain the edition runtime files and `runtime-manifest.json` at its root.
-Use these asset names: `runtime-win32-x64-cuda.tar.gz`,
-`runtime-win32-x64-migraphx.tar.gz`, `runtime-linux-x64-cuda.tar.gz`,
-`runtime-linux-x64-migraphx.tar.gz`, and
-`runtime-darwin-<x64|arm64>-coreml.tar.gz`. CI verifies the release asset's
-SHA256 digest and then verifies every runtime file against the manifest.
-Release assets are limited to less than 2 GiB each.
-
-When `GEMMA_RUNTIME_RELEASE_TAG` points to a release with those assets, CI
-builds each supported edition and uploads its Tauri bundle as a separate
-Actions artifact named `gemma-on-device-<edition>-<runner>-<arch>`. These
-artifacts are retained for 7 days. Without the variable, the optional edition
-bundle job is skipped; the default CPU build and feature checks still run.
-
-The manifest keys are `edition`, `target`, `ort_version`, `webgpu_ep_version`,
-`primary_ep_version`, and `files`; `files` maps each relative runtime path to its lowercase SHA256. CUDA and MIGraphX manifests must include their matching provider shared library.
-Keep DLL/SO/dylib dependencies beside the EP libraries so the platform loader
-can resolve them from the bundle.
-
-MIGraphX bundles use AMD's ONNX Runtime plugin EP built against the pinned ORT
-1.30 ABI, together with the matching ROCm/HIP/MIGraphX runtime. The upstream
-[AMD EP build](https://github.com/onnxruntime/onnxruntime-ep-amdgpu) supports
-Windows and Linux builds. The Windows edition requires the AMD plugin's source
-build path and must be validated on an AMD GPU before distribution. macOS
-CoreML bundles must include an ORT build with CoreML enabled for the target
-architecture. The standard CI always builds the default CPU app; edition
-bundles are built when the runtime release is configured. Hardware EP smoke
-tests require the corresponding self-hosted GPU runners.
+The ROCm edition uses AMD's final ROCm EP distribution: ORT 1.22.1 with ROCm
+7.0, in a separate `gemma-rocm-worker` process. The application keeps ORT
+1.30.0 for WebGPU→CPU fallback, avoiding loading two incompatible ORT ABIs into
+one process. The worker and runtime are bundled for Linux x64. Install a
+compatible AMD GPU driver and ROCm 7.0 runtime on the host. Worker startup or
+first-token failure falls back to WebGPU then CPU; after streamed output begins,
+errors are returned without replaying a second response. The old ROCm EP was
+removed from ORT 1.23 onward, and AMD's published support ends at ROCm 7.0.
+The pinned ROCm provider currently adds about 2 GiB to the installed app (the
+local deb is about 249 MiB compressed). Hardware acceleration still requires
+validation on a matching GPU.
 
 Thresholds: desktop 5 tok/s / mobile 2 tok/s (INT4).
 
@@ -335,8 +311,8 @@ and 2–3 GB of working memory during inference.
 Execution providers in `src-tauri/Cargo.toml`:
 
 - Windows/Linux CUDA edition: `desktop-cuda`
-- Windows/Linux AMD edition: `desktop-migraphx` (AMD plugin EP)
-- Intel/Apple Silicon macOS edition: `desktop-coreml`
+- Linux AMD edition: `desktop-rocm` (isolated legacy ROCm worker)
+- Apple Silicon macOS edition: `desktop-coreml`
 - Android: `nnapi` / `xnnpack`
 - iOS: `coreml` is enabled automatically (GPU + CPU fallback)
 
@@ -364,7 +340,7 @@ Defined in `src-tauri/src/lib.rs:1`:
 | `bun run export:onnx` | `scripts/export_onnx.py` (`optimum-cli export onnx --quant int4`) |
 | `bun run bench` | `scripts/bench.ts` CLI bench |
 | `bun run check:ort` | `scripts/check_ort.ts` environment diagnostics |
-| `bun run tauri:cuda` / `tauri:migraphx` / `tauri:coreml` | Stage a hash-verified runtime bundle and build the selected desktop edition |
+| `bun run tauri:cuda` / `tauri:rocm` / `tauri:coreml` | Download locked upstream runtime wheels, verify hashes, stage the edition, and build its bundle |
 
 ## Development Workflow
 

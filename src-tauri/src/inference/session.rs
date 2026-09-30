@@ -2,6 +2,8 @@ use anyhow::Result;
 use ort::session::{builder::GraphOptimizationLevel, Session};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+#[cfg(feature = "rocm-worker")]
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -20,6 +22,9 @@ pub struct ModelInfo {
 /// Shared app state for Tauri
 pub struct AppState {
     pub session: Arc<Mutex<Option<InferenceSession>>>,
+    pub model_integrity: tokio::sync::OnceCell<()>,
+    #[cfg(feature = "rocm-worker")]
+    pub rocm_disabled: AtomicBool,
     pub model_dir: PathBuf,
     pub runtime_dir: PathBuf,
 }
@@ -37,8 +42,8 @@ pub struct InferenceSession {
 pub fn preferred_execution_provider() -> &'static str {
     if cfg!(feature = "coreml") {
         "CoreML (GPU + CPU fallback)"
-    } else if cfg!(feature = "migraphx") {
-        "MIGraphX (GPU + CPU fallback)"
+    } else if cfg!(feature = "rocm-worker") {
+        "ROCm (GPU + WebGPU + CPU fallback)"
     } else if cfg!(feature = "tensorrt") {
         "TensorRT"
     } else if cfg!(feature = "cuda") {
@@ -60,6 +65,9 @@ impl AppState {
     pub fn new(model_dir: PathBuf, runtime_dir: PathBuf) -> Self {
         Self {
             session: Arc::new(Mutex::new(None)),
+            model_integrity: tokio::sync::OnceCell::new(),
+            #[cfg(feature = "rocm-worker")]
+            rocm_disabled: AtomicBool::new(false),
             model_dir,
             runtime_dir,
         }
@@ -121,6 +129,15 @@ impl AppState {
 
     pub fn default_tokenizer_path(&self) -> PathBuf {
         self.model_dir.join("tokenizer.json")
+    }
+
+    pub async fn verify_default_model(&self) -> Result<()> {
+        self.model_integrity
+            .get_or_try_init(|| async {
+                super::download::verify_default_model_files(&self.model_dir).await
+            })
+            .await
+            .map(|_| ())
     }
 }
 
@@ -206,7 +223,6 @@ pub fn create_session<P: AsRef<Path>>(
 enum Provider {
     #[cfg(any(
         feature = "cuda",
-        feature = "migraphx",
         feature = "coreml",
         feature = "tensorrt",
         feature = "directml",
@@ -223,7 +239,6 @@ impl Provider {
         match self {
             #[cfg(any(
                 feature = "cuda",
-                feature = "migraphx",
                 feature = "coreml",
                 feature = "tensorrt",
                 feature = "directml",
@@ -243,7 +258,6 @@ fn configured_providers() -> Vec<Provider> {
     let mut providers = Vec::new();
     #[cfg(any(
         feature = "cuda",
-        feature = "migraphx",
         feature = "coreml",
         feature = "tensorrt",
         feature = "directml",
@@ -266,7 +280,6 @@ fn create_session_with_provider(
     match provider {
         #[cfg(any(
             feature = "cuda",
-            feature = "migraphx",
             feature = "coreml",
             feature = "tensorrt",
             feature = "directml",
@@ -279,16 +292,6 @@ fn create_session_with_provider(
     }
 }
 
-#[cfg(feature = "migraphx")]
-fn create_primary_session(
-    builder: ort::session::builder::SessionBuilder,
-    model_path: &Path,
-    runtime_dir: &Path,
-) -> Result<Session> {
-    create_migraphx_session(builder, model_path, runtime_dir)
-}
-
-#[cfg(not(feature = "migraphx"))]
 #[allow(dead_code)]
 fn create_primary_session(
     builder: ort::session::builder::SessionBuilder,
@@ -359,23 +362,7 @@ fn create_webgpu_session(
     )
 }
 
-#[cfg(feature = "migraphx")]
-fn create_migraphx_session(
-    builder: ort::session::builder::SessionBuilder,
-    model_path: &Path,
-    runtime_dir: &Path,
-) -> Result<Session> {
-    create_plugin_session(
-        builder,
-        model_path,
-        runtime_dir,
-        "MIGraphX",
-        "MIGraphXExecutionProvider",
-        migraphx_library_path(runtime_dir),
-    )
-}
-
-#[cfg(any(feature = "migraphx", feature = "webgpu"))]
+#[cfg(feature = "webgpu")]
 fn create_plugin_session(
     builder: ort::session::builder::SessionBuilder,
     model_path: &Path,
@@ -388,14 +375,11 @@ fn create_plugin_session(
     use std::sync::OnceLock;
 
     static WEBGPU_REGISTRATION: OnceLock<std::result::Result<(), String>> = OnceLock::new();
-    static MIGRAPHX_REGISTRATION: OnceLock<std::result::Result<(), String>> = OnceLock::new();
     let env = Environment::current().map_err(|e| anyhow::anyhow!("{}", e))?;
-    let registration_slot = match registration_name {
-        "WebGPU" => &WEBGPU_REGISTRATION,
-        "MIGraphX" => &MIGRAPHX_REGISTRATION,
-        _ => anyhow::bail!("unsupported plugin registration: {registration_name}"),
-    };
-    let registration = registration_slot.get_or_init(|| {
+    if registration_name != "WebGPU" {
+        anyhow::bail!("unsupported plugin registration: {registration_name}");
+    }
+    let registration = WEBGPU_REGISTRATION.get_or_init(|| {
         env.register_ep_library(registration_name, &library_path)
             .map(|_| ())
             .map_err(|e| e.to_string())
@@ -433,19 +417,6 @@ fn webgpu_library_path(runtime_dir: &Path) -> PathBuf {
         "libonnxruntime_providers_webgpu.dylib"
     } else {
         "libonnxruntime_providers_webgpu.so"
-    };
-    runtime_dir.join(filename)
-}
-
-#[cfg(feature = "migraphx")]
-fn migraphx_library_path(runtime_dir: &Path) -> PathBuf {
-    if let Ok(path) = std::env::var("GEMMA_MIGRAPHX_EP_LIBRARY") {
-        return PathBuf::from(path);
-    }
-    let filename = if cfg!(target_os = "windows") {
-        "onnxruntime_providers_migraphx.dll"
-    } else {
-        "libonnxruntime_providers_migraphx.so"
     };
     runtime_dir.join(filename)
 }

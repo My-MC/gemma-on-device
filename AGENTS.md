@@ -10,7 +10,7 @@ This file defines operational rules for agents/contributors in `gemma-on-device`
 
 ## Tech Stack (Fixed)
 
-- **Rust**: `ort =2.0.0-rc.13` (`half` feature; desktop editions: CUDA/MIGraphX/CoreML with WebGPU plugin fallback), `tokenizers 0.22`, `tauri 2.12`, `tauri-plugin-opener 2.7`, `tokio full`, `reqwest 0.12` (`rustls-tls` + `stream`), `anyhow`, `ndarray 0.16`
+- **Rust**: `ort =2.0.0-rc.13` (`half` feature; desktop editions: CUDA/CoreML/WebGPU with CPU fallback; Linux ROCm worker uses ORT 1.22.1), `tokenizers 0.23`, `tauri 2.12`, `tauri-plugin-opener 2.7`, `tokio full`, `reqwest 0.12` (`rustls-tls` + `stream`), `anyhow`, `ndarray 0.17`
 - **JS**: `Bun 1.3.14` (package manager + runtime), `React 19`, `Vite 7.3.6`, `TypeScript 5.8`, `@tauri-apps/api 2.12`, `@tauri-apps/plugin-opener 2.7`, `@tauri-apps/cli 2.12`
 - **Build**: `vite.config.ts` uses `port 1420 strictPort`, `host TAURI_DEV_HOST`, `frontendDist ../dist`; `tauri.conf.json` uses `beforeDevCommand: bun run dev`
 - **JS execution**: `package.json:scripts` call `vite` directly. Run with `bun run dev` / `bun run build`. Do NOT use `bunx --bun vite`.
@@ -94,7 +94,7 @@ Follow global `~/.config/opencode/AGENTS.md`:
 
 ## Mobile
 
-- Desktop editions are built with `bun run tauri:cuda`, `bun run tauri:migraphx`, or `bun run tauri:coreml`; each expects a SHA256-locked runtime under `runtime-artifacts/`. CI downloads these bundles from the GitHub Release selected by the `GEMMA_RUNTIME_RELEASE_TAG` repository variable and uploads each built edition as a separate 7-day Actions artifact. Default remains CPU.
+- Desktop editions are built with `bun run tauri:cuda`, `bun run tauri:rocm`, or `bun run tauri:coreml`; `scripts/prepare_runtime.py` downloads SHA256-pinned upstream wheels from `scripts/runtime_lock.json` and stages them under ignored `runtime-artifacts/`. ROCm uses an isolated ORT 1.22.1 worker process while the app retains ORT 1.30.0 for WebGPU/CPU fallback. CI builds Windows/Linux CUDA, Linux ROCm, and Apple Silicon CoreML bundles and uploads each as a separate 7-day Actions artifact. Default remains CPU.
 - Android: `cargo ndk`, `aarch64-linux-android` etc.; iOS: `aarch64-apple-ios`
 - 1B INT4 is 1.2GB + 2-3GB RAM at inference → 4GB+ device recommended. 3n-E2B is mobile-optimized.
 
