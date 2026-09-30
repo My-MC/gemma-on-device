@@ -274,9 +274,15 @@ brew install xcodegen libimobiledevice cocoapods
 bun run tauri ios init
 bun run tauri ios dev "Your iPhone"
 
-# Signed debug IPA
-bun run tauri ios build --debug --target aarch64 --export-method debugging --ci
+# Unsigned release IPA for AltStore Classic (AltStore signs it during sideloading)
+bun run tauri ios build --target aarch64 --features coreml --no-sign --ci
 ```
+
+### Mobile CI packages
+
+The `CI` workflow builds mobile packages on pushes to `master`, pull requests, and manual runs. Android creates ARM64 APK and AAB artifacts on every run. They are signed when all four repository secrets are available: `ANDROID_KEY_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and `ANDROID_STORE_PASSWORD`; otherwise, CI creates unsigned packages and reports the mode in the run summary. GitHub does not pass repository secrets to workflows triggered by fork pull requests, so those runs produce unsigned packages. Unsigned APKs cannot be installed until signed.
+
+iOS creates an unsigned ARM64 release IPA without signing secrets. Download the `gemma-on-device-ios-altstore-classic` artifact, then import the IPA with AltStore Classic so AltStore can sign and sideload it. Artifacts are retained for seven days.
 
 The generated Xcode project lives in `src-tauri/gen/apple`. Set
 `bundle.iOS.developmentTeam` in `src-tauri/tauri.conf.json` to the team reported

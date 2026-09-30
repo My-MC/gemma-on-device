@@ -158,6 +158,12 @@ CI will enforce the same gates (`.github/workflows` upcoming). A PR with failing
 - Android: `cargo ndk` targets `aarch64-linux-android` etc., plus `xnnpack`/`nnapi`. iOS: `aarch64-apple-ios`. See `README.md` for SDK setup.
 - Memory: 1B INT4 ~1.2 GB disk + 2-3 GB RAM at inference → 4 GB+ device recommended.
 
+## Mobile CI packages
+
+- The CI workflow builds Android and iOS packages on pushes to `master`, pull requests, and manual runs.
+- Android creates ARM64 APK and AAB artifacts on every run. Repository secrets `ANDROID_KEY_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and `ANDROID_STORE_PASSWORD` enable release signing; without them, the job builds unsigned packages and records that mode in the workflow summary. GitHub withholds repository secrets from fork pull requests, so those runs produce unsigned packages. An unsigned APK must be signed before device installation.
+- iOS creates an unsigned ARM64 release IPA with `tauri ios build --no-sign`; AltStore Classic signs it during sideloading, so no Apple signing secrets are required. The IPA artifact is retained for seven days.
+
 ## Verification (CI Minimum)
 
 - `bun run build` and `cargo check --manifest-path src-tauri/Cargo.toml` must pass.
