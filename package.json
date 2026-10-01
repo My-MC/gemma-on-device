@@ -17,10 +17,11 @@
     "check:ort": "bun scripts/check_ort.ts"
   },
   "dependencies": {
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
+    "@fontsource-variable/noto-sans-jp": "5.3.0",
     "@tauri-apps/api": "^2.12.0",
-    "@tauri-apps/plugin-opener": "^2.7.0"
+    "@tauri-apps/plugin-opener": "^2.7.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",

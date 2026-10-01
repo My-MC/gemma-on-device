@@ -5,6 +5,7 @@
     "": {
       "name": "gemma-on-device",
       "dependencies": {
+        "@fontsource-variable/noto-sans-jp": "5.3.0",
         "@tauri-apps/api": "^2.12.0",
         "@tauri-apps/plugin-opener": "^2.7.0",
         "react": "^19.3.0",
@@ -22,6 +23,8 @@
     },
   },
   "packages": {
+    "@fontsource-variable/noto-sans-jp": ["@fontsource-variable/noto-sans-jp@5.3.0", "", {}, "sha512-XVL9GfGBRjj523v9w3Bctu4mNq7E5rUa+AMZm8DK1EM3LAGlKC3DZMvuqkLn4DB4TwwoAjcsJUCiRpUTDzzOkw=="],
+
     "@oxc-project/types": ["@oxc-project/types@0.151.0", "", {}, "sha512-J1yXrIlNDZVzE3ada310xeAw7nH8yCAyLPuUIsjKatFPmfn5bS1oW+cM+QsGOtVWd5nhSpbwZWx/rue+r5Z+PA=="],
 
     "@rolldown/binding-android-arm-eabi": ["@rolldown/binding-android-arm-eabi@1.2.11", "", { "os": "android", "cpu": "arm" }, "sha512-A5kXfGKvKWWZE0TtPrfsvT+q4Y5d1QG8gGUzpYjGydM+fARM9MuX90PrXYXe0XbsDVgyxxNzHo6giCj90bsFNw=="],
