@@ -1,17 +1,7 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { generateLocalText, loadLocalModel, LOCAL_MODELS } from "./inference";
 import "./App.css";
-
-type ModelInfo = {
-  model_id: string;
-  onnx_path: string;
-  tokenizer_path: string;
-  exists: boolean;
-  size_bytes?: number;
-  quantization: string;
-  description: string;
-};
 
 type GenerateResult = {
   text: string;
@@ -39,9 +29,10 @@ type BenchResult = {
 };
 
 const MODEL_VARIANTS = [
-  { value: "1b-int4", label: "1B INT4 (推奨, ~1.2GB, community ONNX)" },
-  { value: "1b-int8", label: "1B INT8 (~1.5GB)" },
-  { value: "3n-e2b-int4", label: "3n E2B INT4 (モバイル最適化, 実験的)" },
+  { value: "gemma-4-e2b", label: "Gemma 4 E2B (QAT, テキスト・画像)" },
+  { value: "bonsai-1.7b", label: "Bonsai 1.7B (Q4)" },
+  { value: "lfm2.5-350m", label: "LFM2.5 350M (Q4, 軽量)" },
+  { value: "lfm2.5-1.2b", label: "LFM2.5 1.2B Instruct (Q4)" },
 ] as const;
 
 function ModelVariantSelect({
@@ -196,45 +187,40 @@ type SystemInfo = {
   model_dir: string;
 };
 
-type DownloadProgress = {
-  file: string;
-  downloaded: number;
-  total?: number;
-  percent?: number;
-  done: boolean;
-  error?: string;
-};
-
-function formatBytes(b?: number) {
-  if (b == null) return "-";
-  if (b < 1024) return `${b} B`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
-  if (b < 1024 * 1024 * 1024) return `${(b / 1024 / 1024).toFixed(1)} MB`;
-  return `${(b / 1024 / 1024 / 1024).toFixed(2)} GB`;
-}
-
 export default function App() {
   const [prompt, setPrompt] = useState("こんにちは！Gemmaのオンデバイス推論について教えて。");
   const [maxTokens, setMaxTokens] = useState(128);
   const [temperature, setTemperature] = useState(0.7);
-  const [useChatTemplate, setUseChatTemplate] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamTokens, setStreamTokens] = useState<string[]>([]);
   const [result, setResult] = useState<GenerateResult | null>(null);
-  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [loadedModels, setLoadedModels] = useState<string[]>([]);
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [bench, setBench] = useState<BenchResult | null>(null);
   const [benchRunning, setBenchRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Download state
-  const [variant, setVariant] = useState("1b-int4");
+  const [variant, setVariant] = useState(() => {
+    const stored = localStorage.getItem("gemma-on-device:model");
+    return LOCAL_MODELS.some((model) => model.id === stored) ? stored! : "lfm2.5-350m";
+  });
   const [downloading, setDownloading] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState<Record<string, DownloadProgress>>({});
   const [downloadComplete, setDownloadComplete] = useState<string[] | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [image, setImage] = useState<File | null>(null);
+  const imagePreview = useMemo(() => image ? URL.createObjectURL(image) : null, [image]);
+  const [loadStatus, setLoadStatus] = useState<string | null>(null);
   const streamTokensRef = useRef<string[]>([]);
+
+  useEffect(() => () => {
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+  }, [imagePreview]);
+
+  useEffect(() => {
+    localStorage.setItem("gemma-on-device:model", variant);
+  }, [variant]);
 
   const finalizeResult = (payload: GenerateResult) => {
     // Preserve partial streamed output when inference failed mid-generation
@@ -249,70 +235,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    // Load system + model status
     invoke<SystemInfo>("get_system_info").then(setSystem).catch(() => setSystem(null));
-    invoke<ModelInfo[]>("check_model_status").then(setModels).catch(() => {});
-    invoke<string>("greet", { name: "Gemma" }).catch(() => {});
-
-    const unlistenFns: (() => void)[] = [];
-    let cancelled = false;
-
-    const setup = async () => {
-      const u1 = await listen<string>("token", (e) => {
-        const next = [...streamTokensRef.current, e.payload];
-        streamTokensRef.current = next;
-        setStreamTokens(next);
-      });
-      if (cancelled) {
-        u1();
-        return;
-      }
-      unlistenFns.push(u1);
-
-      const u2 = await listen<GenerateResult>("generation-complete", (e) => {
-        finalizeResult(e.payload);
-      });
-      if (cancelled) {
-        u2();
-        unlistenFns.forEach((fn) => fn());
-        return;
-      }
-      unlistenFns.push(u2);
-
-      const u3 = await listen<DownloadProgress>("download-progress", (e) => {
-        setDownloadProgress((prev) => ({ ...prev, [e.payload.file]: e.payload }));
-        if (e.payload.error) {
-          setDownloadError(e.payload.error);
-        }
-      });
-      if (cancelled) {
-        u3();
-        unlistenFns.forEach((fn) => fn());
-        return;
-      }
-      unlistenFns.push(u3);
-
-      const u4 = await listen<string[]>("download-complete", (e) => {
-        setDownloadComplete(e.payload);
-        setDownloading(false);
-        invoke<ModelInfo[]>("get_model_info").then(setModels).catch(() => {});
-      });
-      if (cancelled) {
-        u4();
-        unlistenFns.forEach((fn) => fn());
-        return;
-      }
-      unlistenFns.push(u4);
-    };
-    setup().catch((e) => {
-      console.error("listener setup failed", e);
-      unlistenFns.forEach((fn) => fn());
-    });
-
-    return () => {
-      cancelled = true;
-      unlistenFns.forEach((fn) => fn());
-    };
   }, []);
 
   async function handleGenerate(stream: boolean) {
@@ -323,24 +246,34 @@ export default function App() {
     setIsGenerating(true);
     setIsStreaming(stream);
 
-    const payload = {
-      prompt,
-      maxTokens,
-      temperature,
-      useChatTemplate,
-    };
-
     try {
-      if (stream) {
-        const res = await invoke<GenerateResult>("generate_stream", payload);
-        if (res) {
-          finalizeResult(res);
-        }
-      } else {
-        const res = await invoke<GenerateResult>("generate", payload);
-        finalizeResult(res);
-      }
-    } catch (e: any) {
+      const started = performance.now();
+      await loadLocalModel(selectedModel, setLoadStatus);
+      setLoadedModels((previous) => previous.includes(selectedModel.id) ? previous : [...previous, selectedModel.id]);
+      const generated = await generateLocalText({
+        model: selectedModel,
+        prompt,
+        image: image ?? undefined,
+        maxTokens,
+        temperature,
+        onToken: stream ? (token) => {
+          streamTokensRef.current = [...streamTokensRef.current, token];
+          setStreamTokens(streamTokensRef.current);
+        } : undefined,
+      });
+      const latencyMs = Math.round(performance.now() - started);
+      const generatedTokens = generated.generatedTokens;
+      finalizeResult({
+        text: generated.text,
+        prompt_tokens: 0,
+        generated_tokens: generatedTokens,
+        total_tokens: generatedTokens,
+        latency_ms: latencyMs,
+        tokens_per_sec: Math.round((generatedTokens / (latencyMs / 1000)) * 10) / 10,
+        is_mock: false,
+        model_id: selectedModel.name,
+      });
+    } catch (e: unknown) {
       setError(String(e));
       setIsGenerating(false);
       setIsStreaming(false);
@@ -352,36 +285,43 @@ export default function App() {
     setBench(null);
     setError(null);
     try {
-      const res = await invoke<BenchResult>("bench_inference", { iterations: 3 });
-      setBench(res);
-    } catch (e: any) {
+      await loadLocalModel(selectedModel, setLoadStatus);
+      setLoadedModels((previous) => previous.includes(selectedModel.id) ? previous : [...previous, selectedModel.id]);
+      const started = performance.now();
+      const tokens: number[] = [];
+      for (let i = 0; i < 3; i += 1) {
+        const generated = await generateLocalText({ model: selectedModel, prompt: "こんにちは。", maxTokens: 32, temperature: 0 });
+        tokens.push(generated.generatedTokens);
+      }
+      const latency = (performance.now() - started) / 3;
+      setBench({
+        model_id: selectedModel.name,
+        platform: system?.platform ?? navigator.platform,
+        arch: system?.arch ?? "unknown",
+        prompt: "こんにちは。",
+        iterations: 3,
+        avg_latency_ms: latency,
+        avg_tokens_per_sec: (tokens.reduce((a, b) => a + b, 0) / 3) / (latency / 1000),
+        total_tokens: tokens.reduce((a, b) => a + b, 0),
+        is_mock: false,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (e: unknown) {
       setError(String(e));
     } finally {
       setBenchRunning(false);
     }
   }
 
-  async function refreshModels() {
-    try {
-      const m = await invoke<ModelInfo[]>("get_model_info");
-      setModels(m);
-    } catch (e: any) {
-      setError(String(e));
-    }
-  }
-
   async function handleDownload() {
     setDownloading(true);
-    setDownloadProgress({});
     setDownloadComplete(null);
     setDownloadError(null);
     setError(null);
     try {
-      const files = await invoke<string[]>("download_model", { variant });
-      setDownloadComplete(files);
-      // also refresh models in case event missed
-      const m = await invoke<ModelInfo[]>("get_model_info").catch(() => null);
-      if (m) setModels(m);
+      await loadLocalModel(selectedModel, setLoadStatus);
+      setLoadedModels((previous) => previous.includes(selectedModel.id) ? previous : [...previous, selectedModel.id]);
+      setDownloadComplete([selectedModel.repo]);
     } catch (e: any) {
       setDownloadError(String(e));
       setError(String(e));
@@ -390,28 +330,25 @@ export default function App() {
     }
   }
 
-  const primaryModel = models.find((m) => m.exists) ?? models[0];
-  const downloadEntries = Object.values(downloadProgress);
+  const selectedModel = LOCAL_MODELS.find((model) => model.id === variant) ?? LOCAL_MODELS[2];
 
   return (
     <main className="app">
       <header className="header">
         <div className="header-title">
           <h1>Gemma On Device</h1>
-          <span className="subtitle">ort × Tauri × React (Bun) — マルチプラットフォーム推論検証</span>
+          <span className="subtitle">ONNX Runtime Web × Tauri × React — 端末内モデル推論</span>
         </div>
         <div className="header-badges">
           {system && (
             <>
               <span className="badge">{system.platform}/{system.arch}</span>
-              <span className="badge ort">{system.ort_available ? "ort ✓" : "ort ✗"}</span>
+              <span className="badge ort">{navigator.gpu ? "WebGPU" : "WASM"}</span>
             </>
           )}
-          {primaryModel && (
-            <span className={`badge ${primaryModel.exists ? "ok" : "warn"}`}>
-              {primaryModel.exists ? "model ✓" : "model ✗ (mock)"}
+          <span className={`badge ${loadedModels.includes(selectedModel.id) ? "ok" : "warn"}`}>
+              {loadedModels.includes(selectedModel.id) ? "model ✓" : "model not loaded"}
             </span>
-          )}
         </div>
       </header>
 
@@ -420,43 +357,41 @@ export default function App() {
           <div className="card-title">System</div>
           <div className="system-grid">
             <div><strong>Platform</strong> {system.platform}/{system.arch}</div>
-            <div><strong>Model dir</strong> <code>{system.model_dir}</code></div>
             <div><strong>Tauri</strong> {system.tauri_version}</div>
-            <div><strong>ort</strong> {system.ort_available ? "available (CPU default, EPs via features)" : "unavailable"}</div>
+            <div><strong>Runtime</strong> ONNX Runtime Web ({navigator.gpu ? "WebGPU" : "WASM"})</div>
           </div>
         </section>
       )}
 
       <section className="card">
         <div className="card-title row-between">
-          <span>Models — Gemma モバイル向け (INT4推奨)</span>
-          <button className="small" onClick={refreshModels}>更新</button>
+          <span>Models — 新世代のオンデバイスモデル</span>
+          <span className="muted">WebGPU / WASM · Q4</span>
         </div>
         <div className="model-grid">
-          {models.length === 0 && <p className="muted">モデル情報を取得中… (Tauri外では表示されません)</p>}
-          {models.map((m) => (
-            <div key={m.model_id} className={`model-card ${m.exists ? "exists" : "missing"}`}>
-              <div className="model-id">{m.model_id}</div>
+          {LOCAL_MODELS.map((model) => (
+            <button key={model.id} className={`model-card ${variant === model.id ? "exists" : "missing"}`} disabled={Boolean(image) && !model.vision} onClick={() => setVariant(model.id)}>
+              <div className="model-id">{model.name}</div>
               <div className="model-meta">
-                <span className={`pill ${m.quantization}`}>{m.quantization}</span>
-                <span className="muted">{formatBytes(m.size_bytes)}</span>
-                <span className={`pill ${m.exists ? "ok" : "warn"}`}>{m.exists ? "ready" : "missing"}</span>
+                <span className="pill">{model.dtype.toUpperCase()}</span>
+                <span className="muted">{model.size}</span>
+                <span className={`pill ${loadedModels.includes(model.id) ? "ok" : "warn"}`}>{loadedModels.includes(model.id) ? "ready" : "not loaded"}</span>
               </div>
-              <div className="model-desc">{m.description}</div>
-              <code className="model-path">{m.onnx_path}</code>
-            </div>
+              <div className="model-desc">{model.description}</div>
+              <code className="model-path">{model.repo}</code>
+            </button>
           ))}
         </div>
 
         <div className="download-panel">
-          <div className="download-title">画面からダウンロード</div>
+          <div className="download-title">モデル取得</div>
           <div className="download-controls">
             <div className="download-variant-field">
               <span id="download-variant-label">Variant</span>
               <ModelVariantSelect
                 value={variant}
                 onChange={setVariant}
-                disabled={downloading}
+                disabled={downloading || Boolean(image)}
                 labelId="download-variant-label"
               />
             </div>
@@ -464,37 +399,14 @@ export default function App() {
               {downloading ? "ダウンロード中…" : "モデルをダウンロード"}
             </button>
             <span className="muted" style={{ fontSize: "0.78rem" }}>
-              Hugging Face (onnx-community) から取得。既存ファイルはスキップ。1GB超のため数分かかります。
+              Hugging Faceから端末へ取得し、ブラウザーキャッシュに保存します。
             </span>
           </div>
-
-          {downloadEntries.length > 0 && (
-            <div className="download-progress">
-              {downloadEntries.map((p) => (
-                <div key={p.file} className="dl-row">
-                  <div className="dl-file">
-                    <strong>{p.file}</strong>
-                    <span className="muted">
-                      {formatBytes(p.downloaded)} {p.total ? `/ ${formatBytes(p.total)}` : ""} {p.percent != null ? `· ${p.percent.toFixed(1)}%` : ""}
-                    </span>
-                    {p.done && !p.error && <span className="pill ok">done</span>}
-                    {p.error && <span className="pill warn">error</span>}
-                  </div>
-                  <div className="progress-bar">
-                    <div
-                      className="progress-fill"
-                      style={{ width: `${p.percent ?? (p.done ? 100 : 0)}%` }}
-                    />
-                  </div>
-                  {p.error && <div className="error" style={{ marginTop: 6 }}>{p.error}</div>}
-                </div>
-              ))}
-            </div>
-          )}
+          {loadStatus && <div className="muted" role="status">{loadStatus}</div>}
 
           {downloadComplete && (
             <div className="hint success">
-              ✓ ダウンロード完了: <code>{downloadComplete.length} files</code> — 自動で model ✓ に切替わり、生成で実推論が使われます。
+              ✓ モデルを読み込みました。初回はダウンロードが完了するまで時間がかかります。
               {downloadComplete.map((f) => (
                 <div key={f} style={{ fontSize: "0.75rem", wordBreak: "break-all" }}>{f}</div>
               ))}
@@ -504,7 +416,7 @@ export default function App() {
         </div>
 
         <div className="hint">
-          CLI: <code>bun run download:model</code> でも取得可。配置前はモック推論でUI/パイプラインを検証できます。
+          初回利用時はHugging Faceからモデルを取得します。以後は端末内のキャッシュを利用します。
         </div>
       </section>
 
@@ -519,6 +431,54 @@ export default function App() {
               rows={3}
               placeholder="例: 日本の美しい季節について短く教えて"
             />
+          </label>
+
+          <label>
+            画像入力（Gemma 4 E2B）
+            <input
+              type="file"
+              accept="image/png,image/jpeg"
+              disabled={!selectedModel.vision || isGenerating}
+              onChange={async (event) => {
+                const input = event.currentTarget;
+                const file = input.files?.[0];
+                if (!file) return;
+                if (!/^image\/(png|jpeg)$/.test(file.type)) {
+                  setError("PNGまたはJPEG画像を選択してください。");
+                  input.value = "";
+                  return;
+                }
+                if (file.size > 10 * 1024 * 1024) {
+                  setError("画像は10 MiB以下にしてください。");
+                  input.value = "";
+                  return;
+                }
+                try {
+                  const bitmap = await createImageBitmap(file);
+                  const withinPixelLimit = bitmap.width * bitmap.height <= 20_000_000;
+                  bitmap.close();
+                  if (!withinPixelLimit) {
+                    setError("画像は展開後20メガピクセル以下にしてください。");
+                    input.value = "";
+                    return;
+                  }
+                } catch {
+                  setError("画像を読み込めませんでした。");
+                  input.value = "";
+                  return;
+                }
+                setError(null);
+                setImage(file);
+              }}
+            />
+            {image && imagePreview && (
+              <span className="image-preview">
+                <img src={imagePreview} alt="選択した画像" />
+                <span>{image.name}</span>
+                <button type="button" className="small" onClick={() => setImage(null)}>画像を削除</button>
+              </span>
+            )}
+            {!selectedModel.vision && <span className="muted">画像入力にはGemma 4 E2Bを選択してください。</span>}
           </label>
 
           <div className="controls">
@@ -543,14 +503,7 @@ export default function App() {
                 onChange={(e) => setTemperature(Number(e.target.value))}
               />
             </label>
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={useChatTemplate}
-                onChange={(e) => setUseChatTemplate(e.target.checked)}
-              />
-              Gemma chat template
-            </label>
+            <span className="muted">選択したモデルのチャットテンプレートを使用します。</span>
           </div>
 
           <div className="actions">
@@ -577,7 +530,7 @@ export default function App() {
 
           {isStreaming && streamTokens.length > 0 && (
             <div className="stream-box">
-              <div className="stream-label">streaming… {streamTokens.length} tokens</div>
+                <div className="stream-label">streaming…</div>
               <div className="stream-text">{streamTokens.join("")}</div>
             </div>
           )}
@@ -585,9 +538,9 @@ export default function App() {
           {result && (
             <div className="result">
               <div className="result-header">
-                <strong>{result.is_mock ? "MOCK" : "ort"} — {result.model_id}</strong>
+                <strong>{result.model_id}</strong>
                 <span className="muted">
-                  {result.prompt_tokens} + {result.generated_tokens} = {result.total_tokens} tokens
+                  {result.generated_tokens} generated tokens
                   {" · "}{result.latency_ms} ms · {result.tokens_per_sec.toFixed(1)} tok/s
                 </span>
               </div>
@@ -620,22 +573,18 @@ export default function App() {
       )}
 
       <section className="card howto">
-        <div className="card-title">検証手順 (Bun)</div>
+        <div className="card-title">使い方</div>
         <ol>
-          <li><code>bun install</code> — 依存取得</li>
-          <li>画面の「モデルをダウンロード」または <code>bun run download:model</code> — Gemma 1B INT4 + tokenizer 取得</li>
-          <li><code>bun run dev</code> — Viteのみ (ブラウザ確認)</li>
-          <li><code>bun run tauri dev</code> — Desktop推論</li>
-          <li><code>bun run tauri android dev</code> / <code>bun run tauri ios dev</code> — モバイル (要 NDK/Xcode, 並列検証)</li>
-          <li><code>bun run tauri build</code> — バンドル / <code>bun run bench</code> — CLIベンチ</li>
+          <li>モデルを選んで「モデルをダウンロード」を押すと、端末のブラウザーキャッシュへ保存します。</li>
+          <li>初回の取得後は、保持されたキャッシュからオフラインで実行できます。</li>
+          <li>画像を使う場合はGemma 4 E2Bを選び、PNGまたはJPEGを添付します。</li>
+          <li>開発時は <code>bun install</code>、<code>bun run tauri dev</code> で起動します。</li>
         </ol>
-        <div className="ep-matrix">
-          <strong>EP matrix (ort features):</strong> Win: CPU/DirectML/CUDA · Mac: CPU/CoreML · Linux: CPU/CUDA · Android: CPU/NNAPI/XNNPACK · iOS: CPU/CoreML
-        </div>
+        <div className="ep-matrix">WebGPUに対応しない環境では、WASM CPU実行を試します。</div>
       </section>
 
       <footer className="footer muted">
-        gemma-on-device · Rust ort 2.0 · Tauri 2 · React 19 · Bun 1.3
+        gemma-on-device · ONNX Runtime Web · Tauri 2 · React 19 · Bun
       </footer>
     </main>
   );

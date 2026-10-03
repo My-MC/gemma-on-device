@@ -1,15 +1,24 @@
-# models/
+# Models
 
-Gemma ONNX models for `ort` validation.
+The in-app chat supports Gemma 4 E2B, Bonsai 1.7B, LFM2.5 350M, and LFM2.5 1.2B Instruct. The frontend downloads ONNX model files from pinned Hugging Face revisions on first use and stores them in the browser Cache API. SHA256 hashes are checked as files stream into or out of that cache. These files are not placed in this `models/` directory.
 
-## Expected files (AppState)
+| App model | Hugging Face repository | Revision | Chat input |
+| --- | --- | --- | --- |
+| Gemma 4 E2B | `onnx-community/gemma-4-E2B-it-qat-mobile-ONNX` | `5cd5514efd375abf2801c856a3936b259cc00133` | Text and image, QAT Q2F16 |
+| Bonsai 1.7B | `onnx-community/Bonsai-1.7B-ONNX` | `3f3cf1759daf66342d26610488b9931f2fafcb29` | Text |
+| LFM2.5 350M | `onnx-community/LFM2.5-350M-ONNX` | `2c07371c2e84776cad597f3d813b7d306d292aea` | Text |
+| LFM2.5 1.2B Instruct | `LiquidAI/LFM2.5-1.2B-Instruct-ONNX` | `10f72e70abf67ac0fd7ebf15bc5854726891d864` | Text |
 
-App expects:
+First use needs an internet connection. Later offline availability depends on the platform retaining its browser cache. Expected SHA256 hashes for app models are in `src/inference.ts` (`MODEL_SHA256`); legacy Rust download guidance below applies only to the original Gemma validation commands.
+
+## Legacy Rust `ort` model files
+
+These files are used by the original Rust validation commands, not by the in-app chat:
 - `models/gemma-3-1b-it-int4.onnx` (+ `models/model_q4.onnx_data` kept literal) — Phase1
 - `models/gemma-3n-E2B-it-int4.onnx` (+ `models/decoder_model_merged_q4.onnx_data` literal) — Phase2
 - `models/tokenizer.json` — shared (SentencePiece)
 
-Missing files → app runs in **MOCK mode** (UI pipeline validation without 1GB download).
+Missing files cause the legacy Rust inference commands to use their mock response.
 
 ## Download via Bun (recommended)
 
@@ -49,9 +58,9 @@ Download from Hugging Face:
 - 1B INT8 (`model_int8`, single file): **1.0 GB**
 - 3n E2B INT4 (`decoder_model_merged_q4`): 1.6 MB graph + 1.62 GB data ≈ **1.62 GB**
 
-## SHA256 Verification (Mandatory)
+## Legacy Rust SHA256 Verification
 
-Every model file is verified after download via SHA256 before `Session::commit_from_file`. Expected hashes are listed below and mirrored in `src-tauri/src/inference/download.rs` (`FileSpec.expected_sha256`). All hashes below were taken from the Hugging Face API (`lfs.oid`) and cross-checked by hashing a downloaded file locally. To rotate a hash, update both this file and `download.rs` in the same PR with verification output (`sha256sum` + source).
+Every legacy model file is verified after download via SHA256 before `Session::commit_from_file`. Expected hashes are listed below and mirrored in `src-tauri/src/inference/download.rs` (`FileSpec.expected_sha256`). The in-app browser cache models instead use fixed repository revisions; they are not stored in `models/`.
 
 ```bash
 sha256sum models/gemma-3-1b-it-int4.onnx
