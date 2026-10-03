@@ -150,11 +150,6 @@ def main() -> None:
         if found.parent != destination:
             shutil.copy2(found, destination / name)
 
-    if edition == "cuda" and target.startswith("win32"):
-        for name in ("cublas64_13.dll", "cublasLt64_13.dll"):
-            found = find_file(destination, lambda candidate, expected=name: candidate == expected)
-            shutil.move(found, destination / name)
-
     files = sorted(path for path in destination.rglob("*") if path.is_file())
     manifest = {
         "edition": edition,
