@@ -68,9 +68,6 @@ if (edition === "cuda") {
   requiredRuntime.push(process.platform === "win32"
     ? "onnxruntime_providers_cuda.dll"
     : "libonnxruntime_providers_cuda.so");
-  if (process.platform === "win32") {
-    requiredRuntime.push("cublas64_13.dll", "cublasLt64_13.dll");
-  }
 }
 if (edition === "rocm" && manifest.rocm_ort_version !== "1.22.1") {
   throw new Error(`ROCm worker requires pinned ORT 1.22.1, got ${manifest.rocm_ort_version}`);

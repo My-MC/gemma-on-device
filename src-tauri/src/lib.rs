@@ -50,12 +50,17 @@ async fn get_model_info(state: State<'_, AppState>) -> Result<Vec<ModelInfo>, St
 
 #[tauri::command]
 async fn generate(
+    app: tauri::AppHandle,
     prompt: String,
     max_tokens: Option<usize>,
     temperature: Option<f32>,
     use_chat_template: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<GenerateResult, String> {
+    #[cfg(feature = "cuda")]
+    ensure_cuda_runtime(&app, &state).await;
+    #[cfg(not(feature = "cuda"))]
+    let _ = app;
     let opts = GenerateOptions {
         prompt,
         max_tokens,
@@ -76,6 +81,8 @@ async fn generate_stream(
     use_chat_template: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<GenerateResult, String> {
+    #[cfg(feature = "cuda")]
+    ensure_cuda_runtime(&app, &state).await;
     let opts = GenerateOptions {
         prompt,
         max_tokens,
@@ -100,9 +107,14 @@ async fn generate_stream(
 
 #[tauri::command]
 async fn bench_inference(
+    app: tauri::AppHandle,
     iterations: Option<usize>,
     state: State<'_, AppState>,
 ) -> Result<inference::bench::BenchResult, String> {
+    #[cfg(feature = "cuda")]
+    ensure_cuda_runtime(&app, &state).await;
+    #[cfg(not(feature = "cuda"))]
+    let _ = app;
     let iters = iterations.unwrap_or(3).min(10);
     inference::bench::run_bench(&state, iters)
         .await
@@ -121,6 +133,22 @@ async fn download_model(
         .map_err(|e| e.to_string())
 }
 
+#[cfg(feature = "cuda")]
+async fn ensure_cuda_runtime(app: &tauri::AppHandle, state: &AppState) {
+    if !state.model_variants().iter().any(|model| model.exists) {
+        return;
+    }
+    if let Err(error) = inference::download::ensure_cuda_runtime(app, state).await {
+        eprintln!("[cuda] runtime download failed; trying WebGPU/CPU fallback: {error:#}");
+        return;
+    }
+
+    #[cfg(target_os = "windows")]
+    add_runtime_dll_directory(&state.cuda_runtime_dir);
+    #[cfg(target_os = "linux")]
+    preload_runtime_dependencies(&state.cuda_runtime_dir);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -132,8 +160,13 @@ pub fn run() {
             let model_dir = resolve_model_dir_for_app(app.handle());
             let _ = std::fs::create_dir_all(&model_dir);
             let runtime_dir = resolve_runtime_dir(app.handle());
+            let cuda_runtime_dir = app
+                .path()
+                .app_data_dir()
+                .map(|path| path.join("runtimes").join("cuda"))
+                .unwrap_or_else(|_| runtime_dir.join("cuda-runtime"));
             // Also ensure app_data_dir exists for logs
-            app.manage(AppState::new(model_dir, runtime_dir));
+            app.manage(AppState::new(model_dir, runtime_dir, cuda_runtime_dir));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
