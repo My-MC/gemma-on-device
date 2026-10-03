@@ -210,8 +210,8 @@ bun run tauri:rocm       # Linux x64: ROCm worker → WebGPU → CPU
 bun run tauri:coreml     # macOS 14+ Apple Silicon: CoreML → WebGPU → CPU
 ```
 
-CUDA and CoreML use official ONNX Runtime and WebGPU wheels pinned in
-`scripts/runtime_lock.json`. `scripts/prepare_runtime.py` verifies each wheel,
+CUDA and CoreML use official ONNX Runtime and WebGPU packages pinned in
+`scripts/runtime_lock.json`. `scripts/prepare_runtime.py` verifies every archive,
 extracts native libraries and notices, and creates a SHA256 manifest under
 `runtime-artifacts/`. The bundle builder rechecks every staged file. Local builds
 need Python 3.12 and Bun; CI prepares all runtime editions in the same workflow
@@ -219,10 +219,12 @@ and uploads four separate 7-day artifacts. No project GitHub Release is used as
 a runtime source.
 
 CUDA targets Windows/Linux x64 with ONNX Runtime 1.30.0, CUDA 13, and cuDNN 9.
-Linux bundles include the pinned NVIDIA user-space wheels. Windows needs the
-matching NVIDIA CUDA/cuDNN runtime DLLs available on the host; the CUDA driver
-is always a host prerequisite. CoreML targets macOS 14 or newer on Apple
-Silicon. The GPU driver or operating-system GPU framework remains host supplied.
+Both platform bundles include pinned NVIDIA user-space runtime libraries.
+Windows also bundles cuBLAS 13.8 DLLs; users do not need to install the CUDA
+Toolkit separately. A compatible NVIDIA GPU driver remains a host prerequisite.
+Windows builds may also require the current Microsoft Visual C++ Redistributable
+x64. CoreML targets macOS 14 or newer on Apple Silicon; its GPU framework is
+provided by the operating system.
 
 The ROCm edition uses AMD's final ROCm EP distribution: ORT 1.22.1 with ROCm
 7.0, in a separate `gemma-rocm-worker` process. The application keeps ORT

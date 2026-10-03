@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download hash-pinned ONNX Runtime wheels and stage native runtime files."""
+"""Download hash-pinned ONNX Runtime packages and stage native runtime files."""
 import hashlib
 import json
 import os
@@ -141,6 +141,11 @@ def main() -> None:
         found = find_file(destination, lambda candidate, expected=name: candidate == expected)
         if found.parent != destination:
             shutil.copy2(found, destination / name)
+
+    if edition == "cuda" and target.startswith("win32"):
+        for name in ("cublas64_13.dll", "cublasLt64_13.dll"):
+            found = find_file(destination, lambda candidate, expected=name: candidate == expected)
+            shutil.move(found, destination / name)
 
     files = sorted(path for path in destination.rglob("*") if path.is_file())
     manifest = {
