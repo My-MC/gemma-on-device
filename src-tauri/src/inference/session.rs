@@ -27,6 +27,10 @@ pub struct AppState {
     pub rocm_disabled: AtomicBool,
     pub model_dir: PathBuf,
     pub runtime_dir: PathBuf,
+    #[cfg(feature = "cuda")]
+    pub cuda_runtime_dir: PathBuf,
+    #[cfg(feature = "cuda")]
+    pub cuda_runtime_lock: Mutex<()>,
 }
 
 pub struct InferenceSession {
@@ -62,7 +66,7 @@ pub fn preferred_execution_provider() -> &'static str {
 }
 
 impl AppState {
-    pub fn new(model_dir: PathBuf, runtime_dir: PathBuf) -> Self {
+    pub fn new(model_dir: PathBuf, runtime_dir: PathBuf, _cuda_runtime_dir: PathBuf) -> Self {
         Self {
             session: Arc::new(Mutex::new(None)),
             model_integrity: tokio::sync::OnceCell::new(),
@@ -70,6 +74,10 @@ impl AppState {
             rocm_disabled: AtomicBool::new(false),
             model_dir,
             runtime_dir,
+            #[cfg(feature = "cuda")]
+            cuda_runtime_dir: _cuda_runtime_dir,
+            #[cfg(feature = "cuda")]
+            cuda_runtime_lock: Mutex::new(()),
         }
     }
 

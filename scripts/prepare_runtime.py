@@ -57,6 +57,11 @@ def selected(name: str) -> bool:
     )
 
 
+def is_cuda_runtime_package(package: dict) -> bool:
+    url = package["url"].lower()
+    return "/nvidia_" in url or "/libcublas/" in url
+
+
 def safe_destination(root: Path, name: str) -> Path:
     rel = PurePosixPath(name)
     if rel.is_absolute() or ".." in rel.parts:
@@ -108,7 +113,10 @@ def main() -> None:
     destination.mkdir(parents=True)
     extracted: list[Path] = []
     for package in LOCK["targets"][key]["packages"]:
-        extracted.extend(extract(fetch(package), destination))
+        archive = fetch(package)
+        if edition == "cuda" and is_cuda_runtime_package(package):
+            continue
+        extracted.extend(extract(archive, destination))
 
     if edition == "rocm":
         rocm_root = destination / "rocm"

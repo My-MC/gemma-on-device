@@ -219,18 +219,22 @@ and uploads four separate 7-day artifacts. No project GitHub Release is used as
 a runtime source.
 
 CUDA targets Windows/Linux x64 with ONNX Runtime 1.30.0, CUDA 13, and cuDNN 9.
-Both platform bundles include pinned NVIDIA user-space runtime libraries.
-Windows also bundles cuBLAS 13.8 DLLs; users do not need to install the CUDA
-Toolkit separately. A compatible NVIDIA GPU driver remains a host prerequisite.
+The app bundles ONNX Runtime and WebGPU, then downloads the pinned NVIDIA
+user-space libraries, including cuBLAS, on the first inference. The downloads
+are SHA256-verified and kept in the app data directory. Users do not need to
+install the CUDA Toolkit separately; a compatible NVIDIA GPU driver remains a
+host prerequisite. If the download fails, inference continues through WebGPU
+and CPU when the model supports those providers.
 Windows builds may also require the current Microsoft Visual C++ Redistributable
-x64. CoreML targets macOS 14 or newer on Apple Silicon; its GPU framework is
-provided by the operating system.
+x64. CoreML targets macOS 14 or newer on Apple Silicon; CoreML itself is
+provided by the operating system. The WebGPU provider remains bundled in every
+GPU edition so fallback works without downloading another provider at runtime.
 
 The ROCm edition uses AMD's final ROCm EP distribution: ORT 1.22.1 with ROCm
 7.0, in a separate `gemma-rocm-worker` process. The application keeps ORT
 1.30.0 for WebGPU→CPU fallback, avoiding loading two incompatible ORT ABIs into
-one process. The worker and runtime are bundled for Linux x64. Install a
-compatible AMD GPU driver and ROCm 7.0 runtime on the host. Worker startup or
+one process. The worker and AMD provider runtime are bundled for Linux x64.
+Install a compatible AMD GPU driver and ROCm 7.0 runtime on the host. Worker startup or
 first-token failure falls back to WebGPU then CPU; after streamed output begins,
 errors are returned without replaying a second response. The old ROCm EP was
 removed from ORT 1.23 onward, and AMD's published support ends at ROCm 7.0.
