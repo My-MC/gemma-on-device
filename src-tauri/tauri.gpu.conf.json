@@ -1,0 +1,11 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeBuildCommand": "bun run build"
+  },
+  "bundle": {
+    "resources": {
+      "../target/release/ort-runtime/": "ort-runtime/"
+    }
+  }
+}

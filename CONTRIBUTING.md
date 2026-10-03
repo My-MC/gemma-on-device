@@ -157,7 +157,7 @@ CI will enforce the same gates (`.github/workflows` upcoming). A PR with failing
 
 ## Mobile
 
-- Execution providers are Cargo features in `src-tauri/Cargo.toml:31` (`cuda`/`coreml`/`directml`/`nnapi`/`tensorrt`/`xnnpack`). Enable with `cargo tauri build -- --features cuda`. Default is CPU.
+- Desktop editions use `bun run tauri:cuda`, `bun run tauri:rocm`, and `bun run tauri:coreml`. The build downloads official runtime wheels pinned by `scripts/runtime_lock.json`, verifies their SHA256 values, stages native libraries and licenses, then creates a manifest. Linux ROCm uses a separately built legacy-ORT worker. CI uploads Windows/Linux CUDA, Linux ROCm, and Apple Silicon CoreML bundles as separate 7-day Actions artifacts. Default remains CPU.
 - Android: `cargo ndk` targets `aarch64-linux-android` etc., plus `xnnpack`/`nnapi`. iOS: `aarch64-apple-ios`. See `README.md` for SDK setup.
 - Memory: 1B INT4 ~1.2 GB disk + 2-3 GB RAM at inference → 4 GB+ device recommended.
 

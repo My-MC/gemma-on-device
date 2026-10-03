@@ -204,19 +204,45 @@ bun run check:ort             # rustc/cargo/ort/models/tauri-cli diagnostics
 ```bash
 bun run build                 # vite only
 bun run tauri build           # Tauri bundle (target/release/bundle, workspace root)
-# With execution provider
-bun run tauri build -- --features cuda
+# Each edition downloads SHA256-locked upstream wheels and stages native libraries.
+bun run tauri:cuda       # Windows/Linux x64: CUDA → WebGPU → CPU
+bun run tauri:rocm       # Linux x64: ROCm worker → WebGPU → CPU
+bun run tauri:coreml     # macOS 14+ Apple Silicon: CoreML → WebGPU → CPU
 ```
 
-On Apple Silicon Macs, `bun run tauri dev` and `bun run tauri build` include
-CoreML automatically. Inference requests CoreML's `CPUAndGPU` compute mode,
-uses MLProgram with FP16 GPU accumulation, and falls back to CPU for graph nodes
-that CoreML cannot execute. The community Gemma ONNX graph contains dynamic
-operations, so current profiling shows partial GPU offload rather than
-GPU-exclusive execution. Compiled CoreML graphs
-are cached in `models/.coreml-cache/` (or the app data model directory).
-Set `GEMMA_COREML_PROFILE=1` when launching the app to log CoreML's per-operator
-hardware assignment and estimated execution time for GPU diagnostics.
+CUDA and CoreML use official ONNX Runtime and WebGPU packages pinned in
+`scripts/runtime_lock.json`. `scripts/prepare_runtime.py` verifies downloaded
+archives, extracts the bundled native libraries and notices, and creates a
+SHA256 manifest under
+`runtime-artifacts/`. The bundle builder rechecks every staged file. Local builds
+need Python 3.12 and Bun; CI prepares all runtime editions in the same workflow
+and uploads four separate 7-day artifacts. No project GitHub Release is used as
+a runtime source.
+
+CUDA targets Windows/Linux x64 with ONNX Runtime 1.30.0, CUDA 13, and cuDNN 9.
+The app bundles ONNX Runtime and WebGPU, then downloads the pinned NVIDIA
+user-space libraries, including cuBLAS, on the first inference. The downloads
+are SHA256-verified and kept in the app data directory. Users do not need to
+install the CUDA Toolkit separately; a compatible NVIDIA GPU driver remains a
+host prerequisite. If the download fails, inference continues through WebGPU
+and CPU when the model supports those providers. CUDA dependencies are omitted
+from build-time downloads and fetched only by the installed app on first use.
+Windows builds may also require the current Microsoft Visual C++ Redistributable
+x64. CoreML targets macOS 14 or newer on Apple Silicon; CoreML itself is
+provided by the operating system. The WebGPU provider remains bundled in every
+GPU edition so fallback works without downloading another provider at runtime.
+
+The ROCm edition uses AMD's final ROCm EP distribution: ORT 1.22.1 with ROCm
+7.0, in a separate `gemma-rocm-worker` process. The application keeps ORT
+1.30.0 for WebGPU→CPU fallback, avoiding loading two incompatible ORT ABIs into
+one process. The worker and AMD provider runtime are bundled for Linux x64.
+Install a compatible AMD GPU driver and ROCm 7.0 runtime on the host. Worker startup or
+first-token failure falls back to WebGPU then CPU; after streamed output begins,
+errors are returned without replaying a second response. The old ROCm EP was
+removed from ORT 1.23 onward, and AMD's published support ends at ROCm 7.0.
+The pinned ROCm provider currently adds about 2 GiB to the installed app (the
+local deb is about 249 MiB compressed). Hardware acceleration still requires
+validation on a matching GPU.
 
 Thresholds: desktop 5 tok/s / mobile 2 tok/s (INT4).
 
@@ -230,23 +256,22 @@ must be present at runtime or `ort::init()` fails.
 Resolution order used by `src-tauri/src/lib.rs:init_ort()`:
 
 1. `ORT_DYLIB_PATH` env var (explicit override, also picked up by `ort`).
-2. `<exe-dir>/onnxruntime.dll` — where CI stages it via
+2. `<resource-dir>/ort-runtime/onnxruntime.dll` — GPU edition bundle location.
+3. `<exe-dir>/onnxruntime.dll` — where CI stages it via
    `.github/workflows/ci.yml` and where the Windows-only
    `src-tauri/tauri.windows.conf.json` `bundle.resources` places it in installed
-   bundles. Non-Windows builds need no DLL (`ort` links statically and no
-   resource mapping exists outside Windows).
-3. `ort::init()` fallback (lets `ort` use its own DLL search rules).
+   CPU bundles.
+4. `ort::init()` fallback (lets `ort` use its own DLL search rules).
 
 For a manual Windows desktop build, place the matching DLL next to the binary
-or point `ORT_DYLIB_PATH` at it. The version must match the `ort` wheel —
-`ort 2.0.0-rc.13` vendors ONNX Runtime 1.22.0:
+or point `ORT_DYLIB_PATH` at it. `ort 2.0.0-rc.13` is built against ONNX Runtime 1.28; edition bundles use
+the ABI-compatible 1.30 runtime for the WebGPU EP 0.3.0:
 
 ```bash
 # x64
-curl -fsSL -o /tmp/ort.zip https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-win-x64-1.22.0.zip
-echo '174c616efc0271194488642a72f1a514e01487da4dfe84c49296d66e40ebe0da  /tmp/ort.zip' | sha256sum -c -
-unzip -j /tmp/ort.zip 'onnxruntime-win-x64-1.22.0/lib/onnxruntime.dll' -d src-tauri/target/release/ 2>/dev/null \
-  || unzip -j /tmp/ort.zip 'onnxruntime-win-x64-1.22.0/lib/onnxruntime.dll' -d target/release/
+curl -fsSL -o /tmp/ort.zip https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-win-x64-1.30.0.zip
+echo 'c6ba983baf5681af108599675d2a89c2d145512d02de28aed0bff177cd0ba949  /tmp/ort.zip' | sha256sum -c -
+unzip -j /tmp/ort.zip 'onnxruntime-win-x64-1.30.0/lib/onnxruntime.dll' -d target/release/
 bun run tauri build -- --features load-dynamic
 ```
 
@@ -297,12 +322,11 @@ The first launch has no bundled model; use the in-app download button to place
 the INT4 model in the app sandbox. Allow about 1.2 GB of storage for model files
 and 2–3 GB of working memory during inference.
 
-Execution providers in `src-tauri/Cargo.toml:31`:
+Execution providers in `src-tauri/Cargo.toml`:
 
-- Win: `directml` / `cuda` / `tensorrt`
-- Apple Silicon Mac: `coreml` is enabled automatically (GPU + CPU fallback)
-- Intel Mac: `coreml` (explicit Cargo feature)
-- Linux: `cuda`
+- Windows/Linux CUDA edition: `desktop-cuda`
+- Linux AMD edition: `desktop-rocm` (isolated legacy ROCm worker)
+- Apple Silicon macOS edition: `desktop-coreml`
 - Android: `nnapi` / `xnnpack`
 - iOS: `coreml` is enabled automatically (GPU + CPU fallback)
 
@@ -330,6 +354,7 @@ Defined in `src-tauri/src/lib.rs:1`:
 | `bun run export:onnx` | `scripts/export_onnx.py` (`optimum-cli export onnx --quant int4`) |
 | `bun run bench` | `scripts/bench.ts` CLI bench |
 | `bun run check:ort` | `scripts/check_ort.ts` environment diagnostics |
+| `bun run tauri:cuda` / `tauri:rocm` / `tauri:coreml` | Download locked upstream runtime wheels, verify hashes, stage the edition, and build its bundle |
 
 ## Development Workflow
 

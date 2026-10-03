@@ -2,6 +2,8 @@ use anyhow::Result;
 use ort::session::{builder::GraphOptimizationLevel, Session};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+#[cfg(feature = "rocm-worker")]
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -20,24 +22,32 @@ pub struct ModelInfo {
 /// Shared app state for Tauri
 pub struct AppState {
     pub session: Arc<Mutex<Option<InferenceSession>>>,
+    pub model_integrity: tokio::sync::OnceCell<()>,
+    #[cfg(feature = "rocm-worker")]
+    pub rocm_disabled: AtomicBool,
     pub model_dir: PathBuf,
+    pub runtime_dir: PathBuf,
+    #[cfg(feature = "cuda")]
+    pub cuda_runtime_dir: PathBuf,
+    #[cfg(feature = "cuda")]
+    pub cuda_runtime_lock: Mutex<()>,
 }
 
 pub struct InferenceSession {
     pub session: Session,
+    pub execution_provider: String,
     #[allow(dead_code)]
     pub model_info: ModelInfo,
 }
 
-#[allow(dead_code)]
-const APPLE_SILICON_COREML: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
-
-/// Execution provider selected first for this build. Unsupported CoreML nodes
-/// continue on ONNX Runtime's CPU provider.
+/// First execution provider registered for this build. Execution providers
+/// are tried in priority order and unsupported nodes fall back to CPU.
 #[allow(dead_code)]
 pub fn preferred_execution_provider() -> &'static str {
-    if APPLE_SILICON_COREML || cfg!(feature = "coreml") {
+    if cfg!(feature = "coreml") {
         "CoreML (GPU + CPU fallback)"
+    } else if cfg!(feature = "rocm-worker") {
+        "ROCm (GPU + WebGPU + CPU fallback)"
     } else if cfg!(feature = "tensorrt") {
         "TensorRT"
     } else if cfg!(feature = "cuda") {
@@ -46,16 +56,28 @@ pub fn preferred_execution_provider() -> &'static str {
         "DirectML"
     } else if cfg!(feature = "nnapi") {
         "NNAPI"
+    } else if cfg!(feature = "xnnpack") {
+        "XNNPACK"
+    } else if cfg!(feature = "webgpu") {
+        "WebGPU"
     } else {
         "CPU"
     }
 }
 
 impl AppState {
-    pub fn new(model_dir: PathBuf) -> Self {
+    pub fn new(model_dir: PathBuf, runtime_dir: PathBuf, _cuda_runtime_dir: PathBuf) -> Self {
         Self {
             session: Arc::new(Mutex::new(None)),
+            model_integrity: tokio::sync::OnceCell::new(),
+            #[cfg(feature = "rocm-worker")]
+            rocm_disabled: AtomicBool::new(false),
             model_dir,
+            runtime_dir,
+            #[cfg(feature = "cuda")]
+            cuda_runtime_dir: _cuda_runtime_dir,
+            #[cfg(feature = "cuda")]
+            cuda_runtime_lock: Mutex::new(()),
         }
     }
 
@@ -116,12 +138,23 @@ impl AppState {
     pub fn default_tokenizer_path(&self) -> PathBuf {
         self.model_dir.join("tokenizer.json")
     }
+
+    pub async fn verify_default_model(&self) -> Result<()> {
+        self.model_integrity
+            .get_or_try_init(|| async {
+                super::download::verify_default_model_files(&self.model_dir).await
+            })
+            .await
+            .map(|_| ())
+    }
 }
 
-/// Create an ort session with platform-appropriate execution providers
-pub fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Session> {
-    let _ = ort::init().commit();
-
+/// Create a session by trying the edition's primary EP, WebGPU, then CPU.
+pub fn create_session<P: AsRef<Path>>(
+    model_path: P,
+    runtime_dir: &Path,
+    excluded_providers: &[String],
+) -> Result<(Session, String)> {
     let mut builder = Session::builder().map_err(|e| anyhow::anyhow!("{}", e))?;
     builder = builder
         .with_optimization_level(GraphOptimizationLevel::Level3)
@@ -158,26 +191,138 @@ pub fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Session> {
             .map_err(|e| anyhow::anyhow!("{}", e))?;
     }
 
-    #[cfg(any(feature = "coreml", all(target_os = "macos", target_arch = "aarch64")))]
+    let model_path = model_path.as_ref();
+    let mut errors = Vec::new();
+    for provider in configured_providers() {
+        if excluded_providers
+            .iter()
+            .any(|excluded| excluded == provider.name())
+        {
+            continue;
+        }
+        match create_session_with_provider(builder.clone(), model_path, runtime_dir, provider) {
+            Ok(session) => return Ok((session, provider.name().to_string())),
+            Err(error) => errors.push(format!("{}: {error}", provider.name())),
+        }
+    }
+
+    if excluded_providers.iter().any(|excluded| excluded == "CPU") {
+        anyhow::bail!(
+            "Could not create an inference session. {}",
+            errors.join("; ")
+        )
+    }
+    match builder
+        .commit_from_file(model_path)
+        .map_err(|e| anyhow::anyhow!("{}", e))
+    {
+        Ok(session) => Ok((session, "CPU".to_string())),
+        Err(error) => {
+            errors.push(format!("CPU: {error}"));
+            Err(anyhow::anyhow!(
+                "Could not create an inference session. {}",
+                errors.join("; ")
+            ))
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Provider {
+    #[cfg(any(
+        feature = "cuda",
+        feature = "coreml",
+        feature = "tensorrt",
+        feature = "directml",
+        feature = "nnapi",
+        feature = "xnnpack"
+    ))]
+    Primary,
+    #[cfg(feature = "webgpu")]
+    WebGpu,
+}
+
+impl Provider {
+    fn name(self) -> &'static str {
+        match self {
+            #[cfg(any(
+                feature = "cuda",
+                feature = "coreml",
+                feature = "tensorrt",
+                feature = "directml",
+                feature = "nnapi",
+                feature = "xnnpack"
+            ))]
+            Self::Primary => preferred_execution_provider(),
+            #[cfg(feature = "webgpu")]
+            Self::WebGpu => "WebGPU",
+        }
+    }
+}
+
+#[allow(clippy::vec_init_then_push)]
+fn configured_providers() -> Vec<Provider> {
+    #[allow(unused_mut)]
+    let mut providers = Vec::new();
+    #[cfg(any(
+        feature = "cuda",
+        feature = "coreml",
+        feature = "tensorrt",
+        feature = "directml",
+        feature = "nnapi",
+        feature = "xnnpack"
+    ))]
+    providers.push(Provider::Primary);
+    #[cfg(feature = "webgpu")]
+    providers.push(Provider::WebGpu);
+    providers
+}
+
+#[allow(unused_variables, dead_code)]
+fn create_session_with_provider(
+    builder: ort::session::builder::SessionBuilder,
+    model_path: &Path,
+    runtime_dir: &Path,
+    provider: Provider,
+) -> Result<Session> {
+    match provider {
+        #[cfg(any(
+            feature = "cuda",
+            feature = "coreml",
+            feature = "tensorrt",
+            feature = "directml",
+            feature = "nnapi",
+            feature = "xnnpack"
+        ))]
+        Provider::Primary => create_primary_session(builder, model_path, runtime_dir),
+        #[cfg(feature = "webgpu")]
+        Provider::WebGpu => create_webgpu_session(builder, model_path, runtime_dir),
+    }
+}
+
+#[allow(dead_code)]
+fn create_primary_session(
+    builder: ort::session::builder::SessionBuilder,
+    model_path: &Path,
+    _runtime_dir: &Path,
+) -> Result<Session> {
+    #[cfg(feature = "coreml")]
     let coreml_cache_dir = model_path
-        .as_ref()
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join(".coreml-cache");
-    #[cfg(any(feature = "coreml", all(target_os = "macos", target_arch = "aarch64")))]
+    #[cfg(feature = "coreml")]
     std::fs::create_dir_all(&coreml_cache_dir)?;
-
-    // Execution providers are ordered by priority and unsupported nodes fall
-    // back to CPU. Apple Silicon desktop builds enable CoreML automatically.
     #[cfg(feature = "xnnpack")]
     let xnn_threads = std::num::NonZeroUsize::new(
         std::thread::available_parallelism()
-            .map(|n| n.get())
+            .map(|count| count.get())
             .unwrap_or(4)
             .clamp(1, 4),
     )
     .unwrap();
-    let mut builder = builder
+
+    builder
         .with_execution_providers([
             #[cfg(feature = "tensorrt")]
             ort::ep::TensorRT::default().build(),
@@ -185,7 +330,7 @@ pub fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Session> {
             ort::ep::CUDA::default().build(),
             #[cfg(feature = "directml")]
             ort::ep::DirectML::default().build(),
-            #[cfg(any(feature = "coreml", all(target_os = "macos", target_arch = "aarch64")))]
+            #[cfg(feature = "coreml")]
             {
                 let profile_compute_plan =
                     std::env::var("GEMMA_COREML_PROFILE").as_deref() == Ok("1");
@@ -204,12 +349,84 @@ pub fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Session> {
                 .with_intra_op_num_threads(xnn_threads)
                 .build(),
         ])
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
-
-    let session = builder
+        .map_err(|e| anyhow::anyhow!("{}", e))?
         .commit_from_file(model_path)
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
-    Ok(session)
+        .map_err(|e| anyhow::anyhow!("{}", e))
+}
+
+#[cfg(feature = "webgpu")]
+fn create_webgpu_session(
+    builder: ort::session::builder::SessionBuilder,
+    model_path: &Path,
+    runtime_dir: &Path,
+) -> Result<Session> {
+    create_plugin_session(
+        builder,
+        model_path,
+        runtime_dir,
+        "WebGPU",
+        "WebGpuExecutionProvider",
+        webgpu_library_path(runtime_dir),
+    )
+}
+
+#[cfg(feature = "webgpu")]
+fn create_plugin_session(
+    builder: ort::session::builder::SessionBuilder,
+    model_path: &Path,
+    _runtime_dir: &Path,
+    registration_name: &'static str,
+    execution_provider_name: &str,
+    library_path: PathBuf,
+) -> Result<Session> {
+    use ort::environment::Environment;
+    use std::sync::OnceLock;
+
+    static WEBGPU_REGISTRATION: OnceLock<std::result::Result<(), String>> = OnceLock::new();
+    let env = Environment::current().map_err(|e| anyhow::anyhow!("{}", e))?;
+    if registration_name != "WebGPU" {
+        anyhow::bail!("unsupported plugin registration: {registration_name}");
+    }
+    let registration = WEBGPU_REGISTRATION.get_or_init(|| {
+        env.register_ep_library(registration_name, &library_path)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    });
+    registration
+        .as_ref()
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
+
+    let devices = env
+        .devices()
+        .filter(|device| {
+            device
+                .ep()
+                .is_ok_and(|name| name == execution_provider_name)
+        })
+        .collect::<Vec<_>>();
+    if devices.is_empty() {
+        anyhow::bail!("{registration_name} EP registered but no matching device was found")
+    }
+    builder
+        .with_devices(devices, None)
+        .map_err(|e| anyhow::anyhow!("{}", e))?
+        .commit_from_file(model_path)
+        .map_err(|e| anyhow::anyhow!("{}", e))
+}
+
+#[cfg(feature = "webgpu")]
+fn webgpu_library_path(runtime_dir: &Path) -> PathBuf {
+    if let Ok(path) = std::env::var("GEMMA_WEBGPU_EP_LIBRARY") {
+        return PathBuf::from(path);
+    }
+    let filename = if cfg!(target_os = "windows") {
+        "onnxruntime_providers_webgpu.dll"
+    } else if cfg!(target_os = "macos") {
+        "libonnxruntime_providers_webgpu.dylib"
+    } else {
+        "libonnxruntime_providers_webgpu.so"
+    };
+    runtime_dir.join(filename)
 }
 
 /// Resolve model directory: src-tauri/models or project_root/models
@@ -238,7 +455,7 @@ pub fn resolve_model_dir() -> PathBuf {
 mod tests {
     use super::*;
 
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[cfg(all(target_os = "macos", target_arch = "aarch64", feature = "coreml"))]
     #[test]
     fn apple_silicon_build_includes_coreml() {
         use ort::ep::ExecutionProvider;

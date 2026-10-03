@@ -1,5 +1,9 @@
 /target
 /src-tauri/target
+/rocm-worker/target
+/.cache
+__pycache__/
+/runtime-artifacts
 node_modules
 dist
 dist-ssr

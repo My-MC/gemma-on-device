@@ -1,8 +1,15 @@
 use anyhow::Result;
-use ort::session::SessionInputValue;
+use ort::session::{Session, SessionInputValue};
 use ort::value::Tensor;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "rocm-worker")]
+use std::process::Stdio;
 use std::time::{Duration, Instant};
+#[cfg(feature = "rocm-worker")]
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    process::Command,
+};
 
 use super::session::AppState;
 use super::tokenizer::{apply_gemma_chat_template, load_tokenizer, mock_detokenize};
@@ -12,6 +19,7 @@ use super::tokenizer::{apply_gemma_chat_template, load_tokenizer, mock_detokeniz
 const NUM_LAYERS: usize = 26;
 const NUM_KV_HEADS: usize = 1;
 const HEAD_DIM: usize = 256;
+type KvCache = Vec<(Vec<f32>, Vec<f32>)>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateOptions {
@@ -31,6 +39,7 @@ pub struct GenerateResult {
     pub tokens_per_sec: f64,
     pub is_mock: bool,
     pub model_id: String,
+    pub execution_provider: String,
 }
 
 /// Core generation - if model not present, returns mock response for pipeline validation
@@ -53,7 +62,210 @@ pub async fn generate_text(state: &AppState, opts: GenerateOptions) -> Result<Ge
 
     // Once model files exist, inference errors must be visible to the caller;
     // silently returning mock output makes a broken real setup look healthy.
+    #[cfg(feature = "rocm-worker")]
+    {
+        if state
+            .rocm_disabled
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            try_real_inference(state, &prompt, max_tokens, None).await
+        } else {
+            let (rocm_result, _) = try_rocm_worker(state, &prompt, max_tokens, None).await;
+            match rocm_result {
+                Ok(result) => Ok(result),
+                Err(rocm_error) => {
+                    state
+                        .rocm_disabled
+                        .store(true, std::sync::atomic::Ordering::Release);
+                    try_real_inference(state, &prompt, max_tokens, None)
+                        .await
+                        .map_err(|fallback| {
+                            anyhow::anyhow!(
+                                "ROCm failed: {rocm_error}; WebGPU/CPU fallback failed: {fallback}"
+                            )
+                        })
+                }
+            }
+        }
+    }
+    #[cfg(not(feature = "rocm-worker"))]
     try_real_inference(state, &prompt, max_tokens, None).await
+}
+
+#[cfg(feature = "rocm-worker")]
+#[derive(Serialize)]
+struct RocmWorkerRequest<'a> {
+    protocol: u32,
+    model_path: &'a str,
+    tokenizer_path: &'a str,
+    prompt: &'a str,
+    max_tokens: usize,
+    use_chat_template: bool,
+}
+
+#[cfg(feature = "rocm-worker")]
+async fn try_rocm_worker(
+    state: &AppState,
+    prompt: &str,
+    max_tokens: usize,
+    emit: Option<&(dyn Fn(String) -> Result<()> + Send + Sync)>,
+) -> (Result<GenerateResult>, bool) {
+    let executable = state.runtime_dir.join("rocm-worker");
+    let runtime = state.runtime_dir.join("rocm");
+    let model_path = state.default_model_path().to_string_lossy().into_owned();
+    let tokenizer_path = state
+        .default_tokenizer_path()
+        .to_string_lossy()
+        .into_owned();
+    let mut library_dirs = vec![runtime.clone()];
+    let mut pending_dirs = vec![runtime.clone()];
+    while let Some(parent) = pending_dirs.pop() {
+        if let Ok(entries) = std::fs::read_dir(parent) {
+            let children = entries
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| path.is_dir())
+                .collect::<Vec<_>>();
+            pending_dirs.extend(children.iter().cloned());
+            library_dirs.extend(children);
+        }
+    }
+    let request = RocmWorkerRequest {
+        protocol: 1,
+        model_path: &model_path,
+        tokenizer_path: &tokenizer_path,
+        prompt,
+        max_tokens,
+        use_chat_template: false,
+    };
+    let child = Command::new(&executable)
+        .env("GEMMA_ROCM_RUNTIME", &runtime)
+        .env("LD_LIBRARY_PATH", {
+            let old = std::env::var_os("LD_LIBRARY_PATH").unwrap_or_default();
+            let mut paths = library_dirs.clone();
+            paths.extend(std::env::split_paths(&old));
+            match std::env::join_paths(paths) {
+                Ok(paths) => paths,
+                Err(error) => {
+                    return (Err(anyhow::anyhow!("invalid library path: {error}")), false)
+                }
+            }
+        })
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("could not start {}: {e}", executable.display()));
+    let mut child = match child {
+        Ok(child) => child,
+        Err(error) => return (Err(error), false),
+    };
+    let input = match serde_json::to_string(&request) {
+        Ok(input) => input,
+        Err(error) => return (Err(error.into()), false),
+    };
+    let Some(mut stdin) = child.stdin.take() else {
+        return (Err(anyhow::anyhow!("worker stdin unavailable")), false);
+    };
+    if let Err(error) = stdin.write_all(input.as_bytes()).await {
+        let _ = child.kill().await;
+        return (Err(error.into()), false);
+    }
+    if let Err(error) = stdin.write_all(b"\n").await {
+        let _ = child.kill().await;
+        return (Err(error.into()), false);
+    }
+    drop(stdin);
+    let Some(stdout) = child.stdout.take() else {
+        return (Err(anyhow::anyhow!("worker stdout unavailable")), false);
+    };
+    let mut lines = BufReader::new(stdout).lines();
+    let mut emitted = false;
+    let mut response: Option<GenerateResult> = None;
+    loop {
+        let line = match lines.next_line().await {
+            Ok(Some(line)) => line,
+            Ok(None) => break,
+            Err(error) => {
+                let _ = child.kill().await;
+                return (Err(error.into()), emitted);
+            }
+        };
+        let message: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(message) => message,
+            Err(error) => {
+                let _ = child.kill().await;
+                return (
+                    Err(anyhow::anyhow!("invalid worker message: {error}")),
+                    emitted,
+                );
+            }
+        };
+        if message["protocol"] != 1 {
+            let _ = child.kill().await;
+            return (
+                Err(anyhow::anyhow!("unsupported ROCm worker protocol")),
+                emitted,
+            );
+        }
+        match message["event"].as_str() {
+            Some("token") => {
+                let Some(token) = message["text"].as_str() else {
+                    let _ = child.kill().await;
+                    return (
+                        Err(anyhow::anyhow!("ROCm worker token message has no text")),
+                        emitted,
+                    );
+                };
+                emitted = true;
+                if let Some(emit) = emit {
+                    if let Err(error) = emit(token.to_owned()) {
+                        let _ = child.kill().await;
+                        return (Err(error), emitted);
+                    }
+                }
+            }
+            Some("complete") => {
+                response = match serde_json::from_value(message["result"].clone()) {
+                    Ok(result) => Some(result),
+                    Err(error) => {
+                        return (
+                            Err(anyhow::anyhow!("invalid ROCm worker result: {error}")),
+                            emitted,
+                        )
+                    }
+                };
+            }
+            _ => return (Err(anyhow::anyhow!("unknown ROCm worker event")), emitted),
+        }
+    }
+    let status = match child.wait().await {
+        Ok(status) => status,
+        Err(error) => return (Err(error.into()), emitted),
+    };
+    if !status.success() {
+        return (
+            Err(anyhow::anyhow!("ROCm worker exited with {status}")),
+            emitted,
+        );
+    }
+    let Some(mut result) = response else {
+        return (
+            Err(anyhow::anyhow!(
+                "ROCm worker exited without a completion message"
+            )),
+            emitted,
+        );
+    };
+    if result.execution_provider != "ROCm" || result.is_mock {
+        return (
+            Err(anyhow::anyhow!("worker did not report real ROCm inference")),
+            emitted,
+        );
+    }
+    result.latency_ms = result.latency_ms.max(1);
+    (Ok(result), emitted)
 }
 
 fn mock_generate(prompt: &str, max_tokens: usize) -> GenerateResult {
@@ -78,6 +290,7 @@ fn mock_generate(prompt: &str, max_tokens: usize) -> GenerateResult {
         tokens_per_sec: tokens as f64 / (latency as f64 / 1000.0).max(0.001),
         is_mock: true,
         model_id: "mock/gemma-3-1b-it-INT4".to_string(),
+        execution_provider: "Mock".to_string(),
     }
 }
 
@@ -87,6 +300,7 @@ async fn try_real_inference(
     max_tokens: usize,
     emit: Option<&(dyn Fn(String) -> Result<()> + Send + Sync)>,
 ) -> Result<GenerateResult> {
+    state.verify_default_model().await?;
     let start = Instant::now();
     let tok_path = state.default_tokenizer_path();
     let model_path = state.default_model_path();
@@ -98,9 +312,11 @@ async fn try_real_inference(
     // Load or reuse session
     let mut guard = state.session.lock().await;
     if guard.is_none() {
-        let session = super::session::create_session(&model_path)?;
+        let (session, execution_provider) =
+            super::session::create_session(&model_path, &state.runtime_dir, &[])?;
         *guard = Some(super::session::InferenceSession {
             session,
+            execution_provider,
             model_info: super::session::ModelInfo {
                 model_id: "gemma-3-1b-it-INT4".to_string(),
                 onnx_path: model_path.to_string_lossy().to_string(),
@@ -112,81 +328,61 @@ async fn try_real_inference(
             },
         });
     }
-
-    let session = guard.as_mut().unwrap();
+    let mut execution_provider = guard
+        .as_ref()
+        .map(|session| session.execution_provider.clone())
+        .unwrap_or_else(|| "CPU".to_string());
 
     let mut generated_ids: Vec<i64> = Vec::new();
     let mut current_ids = input_ids.clone();
-    let mut cache: Option<Vec<(Vec<f32>, Vec<f32>)>> = None;
+    let mut cache: Option<KvCache> = None;
     let mut decode_stream = emit.map(|_| tokenizer.inner().decode_stream(true));
 
-    for _ in 0..max_tokens {
-        let seq_len = current_ids.len();
+    let mut failed_providers = Vec::new();
+    for iteration in 0..max_tokens {
         let past_len = cache
             .as_ref()
             .and_then(|layers| layers.first())
             .map(|(key, _)| key.len() / (NUM_KV_HEADS * HEAD_DIM))
             .unwrap_or(0);
-        // Use tuple (shape, Vec) to avoid ndarray version mismatch with ort's private ndarray
-        let input_ids_tensor = Tensor::from_array(([1, seq_len], current_ids.clone()))
-            .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
-        let attention_len = past_len + seq_len;
-        let attention_mask_tensor =
-            Tensor::from_array(([1, attention_len], vec![1i64; attention_len]))
-                .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
-
-        let mut inputs: Vec<(String, SessionInputValue)> = vec![
-            ("input_ids".to_string(), input_ids_tensor.into()),
-            ("attention_mask".to_string(), attention_mask_tensor.into()),
-        ];
-        for layer in 0..NUM_LAYERS {
-            let (key, value) = cache
+        let outputs = loop {
+            let inputs = make_session_inputs(&current_ids, past_len, &cache)?;
+            let active_provider = guard
                 .as_ref()
-                .map(|layers| layers[layer].clone())
-                .unwrap_or_default();
-            let key_tensor =
-                Tensor::<f32>::from_array(([1, NUM_KV_HEADS, past_len, HEAD_DIM], key))
-                    .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
-            let value_tensor =
-                Tensor::<f32>::from_array(([1, NUM_KV_HEADS, past_len, HEAD_DIM], value))
-                    .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
-            inputs.push((format!("past_key_values.{layer}.key"), key_tensor.into()));
-            inputs.push((
-                format!("past_key_values.{layer}.value"),
-                value_tensor.into(),
-            ));
-        }
+                .map(|session| session.execution_provider.clone())
+                .unwrap_or_else(|| "CPU".to_string());
+            let run_result = {
+                let session = &mut guard.as_mut().unwrap().session;
+                run_session_step(session, inputs)
+            };
+            match run_result {
+                Ok(step) => break step,
+                Err(error) if iteration == 0 => {
+                    let error = error.to_string();
+                    failed_providers.push(active_provider.clone());
+                    let (replacement, replacement_provider) = super::session::create_session(
+                        &model_path,
+                        &state.runtime_dir,
+                        &failed_providers,
+                    )
+                    .map_err(|fallback| {
+                        anyhow::anyhow!(
+                            "Initial inference failed on {active_provider}: {error}; fallback failed: {fallback}"
+                        )
+                    })?;
+                    let model_info = guard.as_ref().unwrap().model_info.clone();
+                    *guard = Some(super::session::InferenceSession {
+                        session: replacement,
+                        execution_provider: replacement_provider.clone(),
+                        model_info,
+                    });
+                    execution_provider = replacement_provider;
+                }
+                Err(error) => return Err(anyhow::anyhow!("ort run error: {error}")),
+            }
+        };
 
-        let outputs = session
-            .session
-            .run(inputs)
-            .map_err(|e| anyhow::anyhow!("ort run error: {e}"))?;
-
-        let logits = outputs["logits"]
-            .try_extract_tensor::<f32>()
-            .map_err(|e| anyhow::anyhow!("extract error: {e}"))?;
-        let (shape, data) = logits;
-        // shape is &[i64] for ort 2.0; cast to usize
-        if shape.len() != 3 {
-            anyhow::bail!("unexpected logits shape: {:?}", shape);
-        }
-        let vocab = shape[2] as usize;
-        let seq = shape[1] as usize;
-        // last token logits
-        let last_offset = (seq - 1) * vocab;
-        let last_logits = &data[last_offset..last_offset + vocab];
-        let next_id = argmax(last_logits) as i64;
-
-        let mut next_cache = Vec::with_capacity(NUM_LAYERS);
-        for layer in 0..NUM_LAYERS {
-            let (_, key) = outputs[format!("present.{layer}.key")]
-                .try_extract_tensor::<f32>()
-                .map_err(|e| anyhow::anyhow!("extract present key error: {e}"))?;
-            let (_, value) = outputs[format!("present.{layer}.value")]
-                .try_extract_tensor::<f32>()
-                .map_err(|e| anyhow::anyhow!("extract present value error: {e}"))?;
-            next_cache.push((key.to_vec(), value.to_vec()));
-        }
+        let (next_id, next_cache) = outputs;
         cache = Some(next_cache);
 
         // EOS token for Gemma is 1 (<eos>) or 106 (<end_of_turn>) - simple check
@@ -231,7 +427,75 @@ async fn try_real_inference(
         tokens_per_sec,
         is_mock: false,
         model_id: "gemma-3-1b-it-INT4".to_string(),
+        execution_provider,
     })
+}
+
+fn make_session_inputs(
+    current_ids: &[i64],
+    past_len: usize,
+    cache: &Option<KvCache>,
+) -> Result<Vec<(String, SessionInputValue<'static>)>> {
+    let seq_len = current_ids.len();
+    // Tuple shapes avoid ndarray version mismatch with ort's private ndarray.
+    let input_ids_tensor = Tensor::from_array(([1, seq_len], current_ids.to_vec()))
+        .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
+    let attention_len = past_len + seq_len;
+    let attention_mask_tensor = Tensor::from_array(([1, attention_len], vec![1i64; attention_len]))
+        .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
+    let mut inputs: Vec<(String, SessionInputValue)> = vec![
+        ("input_ids".to_string(), input_ids_tensor.into()),
+        ("attention_mask".to_string(), attention_mask_tensor.into()),
+    ];
+    for layer in 0..NUM_LAYERS {
+        let (key, value) = cache
+            .as_ref()
+            .map(|layers| layers[layer].clone())
+            .unwrap_or_default();
+        let key_tensor = Tensor::<f32>::from_array(([1, NUM_KV_HEADS, past_len, HEAD_DIM], key))
+            .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
+        let value_tensor =
+            Tensor::<f32>::from_array(([1, NUM_KV_HEADS, past_len, HEAD_DIM], value))
+                .map_err(|e| anyhow::anyhow!("tensor error: {e}"))?;
+        inputs.push((format!("past_key_values.{layer}.key"), key_tensor.into()));
+        inputs.push((
+            format!("past_key_values.{layer}.value"),
+            value_tensor.into(),
+        ));
+    }
+    Ok(inputs)
+}
+
+fn run_session_step(
+    session: &mut Session,
+    inputs: Vec<(String, SessionInputValue<'static>)>,
+) -> Result<(i64, KvCache)> {
+    let outputs = session
+        .run(inputs)
+        .map_err(|e| anyhow::anyhow!("ort run error: {e}"))?;
+    let logits = outputs["logits"]
+        .try_extract_tensor::<f32>()
+        .map_err(|e| anyhow::anyhow!("extract error: {e}"))?;
+    let (shape, data) = logits;
+    if shape.len() != 3 {
+        anyhow::bail!("unexpected logits shape: {:?}", shape);
+    }
+    let vocab = shape[2] as usize;
+    let seq = shape[1] as usize;
+    let last_offset = (seq - 1) * vocab;
+    let next_id = argmax(&data[last_offset..last_offset + vocab]) as i64;
+
+    let mut cache = Vec::with_capacity(NUM_LAYERS);
+    for layer in 0..NUM_LAYERS {
+        let (_, key) = outputs[format!("present.{layer}.key")]
+            .try_extract_tensor::<f32>()
+            .map_err(|e| anyhow::anyhow!("extract present key error: {e}"))?;
+        let (_, value) = outputs[format!("present.{layer}.value")]
+            .try_extract_tensor::<f32>()
+            .map_err(|e| anyhow::anyhow!("extract present value error: {e}"))?;
+        cache.push((key.to_vec(), value.to_vec()));
+    }
+    Ok((next_id, cache))
 }
 
 fn argmax(slice: &[f32]) -> usize {
@@ -265,12 +529,43 @@ pub async fn generate_stream(
         }
         return Ok(res);
     }
-
     let prompt = if opts.use_chat_template.unwrap_or(true) {
         apply_gemma_chat_template(&opts.prompt)
     } else {
         opts.prompt.clone()
     };
+    #[cfg(feature = "rocm-worker")]
+    {
+        if state
+            .rocm_disabled
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            try_real_inference(state, &prompt, max_tokens, Some(&emit)).await
+        } else {
+            let (rocm_result, emitted) =
+                try_rocm_worker(state, &prompt, max_tokens, Some(&emit)).await;
+            match rocm_result {
+                Ok(result) => Ok(result),
+                Err(rocm_error) => {
+                    state
+                        .rocm_disabled
+                        .store(true, std::sync::atomic::Ordering::Release);
+                    if emitted {
+                        Err(rocm_error)
+                    } else {
+                        try_real_inference(state, &prompt, max_tokens, Some(&emit))
+                            .await
+                            .map_err(|fallback| {
+                                anyhow::anyhow!(
+                                    "ROCm failed: {rocm_error}; WebGPU/CPU fallback failed: {fallback}"
+                                )
+                            })
+                    }
+                }
+            }
+        }
+    }
+    #[cfg(not(feature = "rocm-worker"))]
     try_real_inference(state, &prompt, max_tokens, Some(&emit)).await
 }
 
@@ -282,7 +577,10 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn real_inference_smoke() {
-        let state = AppState::new(std::path::PathBuf::from("../models"));
+        let state = AppState::new(
+            std::path::PathBuf::from("../models"),
+            std::path::PathBuf::from("../runtime-artifacts"),
+        );
         let opts = GenerateOptions {
             prompt: "こんにちは".to_string(),
             max_tokens: Some(8),
@@ -298,7 +596,10 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn real_streaming_inference_smoke() {
-        let state = AppState::new(std::path::PathBuf::from("../models"));
+        let state = AppState::new(
+            std::path::PathBuf::from("../models"),
+            std::path::PathBuf::from("../runtime-artifacts"),
+        );
         let opts = GenerateOptions {
             prompt: "こんにちは".to_string(),
             max_tokens: Some(8),

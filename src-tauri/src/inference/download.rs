@@ -7,6 +7,260 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+#[cfg(feature = "cuda")]
+#[derive(Deserialize)]
+struct RuntimePackage {
+    url: String,
+    sha256: String,
+}
+
+#[cfg(feature = "cuda")]
+#[derive(Deserialize)]
+struct RuntimeTarget {
+    packages: Vec<RuntimePackage>,
+}
+
+#[cfg(feature = "cuda")]
+#[derive(Deserialize)]
+struct RuntimeLock {
+    targets: std::collections::HashMap<String, RuntimeTarget>,
+}
+
+/// Downloads the hash-pinned CUDA user-space libraries the first time the CUDA
+/// edition runs inference. The ORT and WebGPU libraries remain in the app bundle.
+#[cfg(feature = "cuda")]
+pub async fn ensure_cuda_runtime(app: &AppHandle, state: &super::session::AppState) -> Result<()> {
+    let _guard = state.cuda_runtime_lock.lock().await;
+    if cuda_runtime_is_ready(&state.cuda_runtime_dir) {
+        return Ok(());
+    }
+
+    let stage = state
+        .cuda_runtime_dir
+        .with_extension(format!("staging-{}", std::process::id()));
+    let _ = tokio::fs::remove_dir_all(&stage).await;
+    tokio::fs::create_dir_all(&stage).await?;
+    let result = download_cuda_runtime(app, &stage).await;
+    if let Err(error) = result {
+        let _ = tokio::fs::remove_dir_all(&stage).await;
+        emit_cuda_progress(app, "CUDA runtime", 0, None, false, Some(error.to_string()));
+        return Err(error);
+    }
+
+    if state.cuda_runtime_dir.exists() {
+        tokio::fs::remove_dir_all(&state.cuda_runtime_dir).await?;
+    }
+    if let Some(parent) = state.cuda_runtime_dir.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    tokio::fs::rename(&stage, &state.cuda_runtime_dir).await?;
+    emit_cuda_progress(app, "CUDA runtime", 1, Some(1), true, None);
+    Ok(())
+}
+
+#[cfg(feature = "cuda")]
+fn cuda_runtime_is_ready(directory: &Path) -> bool {
+    let marker = directory.join("runtime-ready");
+    if !marker.is_file() {
+        return false;
+    }
+    #[cfg(target_os = "windows")]
+    let required = ["cublas64_13.dll", "cublasLt64_13.dll"];
+    #[cfg(target_os = "linux")]
+    let required = ["libcublas.so.13", "libcublasLt.so.13"];
+    required
+        .iter()
+        .all(|name| find_runtime_file(directory, name))
+}
+
+#[cfg(feature = "cuda")]
+fn find_runtime_file(directory: &Path, filename: &str) -> bool {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let path = entry.path();
+        if path.is_dir() {
+            find_runtime_file(&path, filename)
+        } else {
+            path.file_name().is_some_and(|name| name == filename)
+        }
+    })
+}
+
+#[cfg(feature = "cuda")]
+async fn download_cuda_runtime(app: &AppHandle, stage: &Path) -> Result<()> {
+    let lock: RuntimeLock =
+        serde_json::from_str(include_str!("../../../scripts/runtime_lock.json"))?;
+    #[cfg(target_os = "windows")]
+    let target = "win32-x64-cuda";
+    #[cfg(target_os = "linux")]
+    let target = "linux-x64-cuda";
+    let target = lock
+        .targets
+        .get(target)
+        .context("CUDA runtime is unavailable for this platform")?;
+    let packages = target
+        .packages
+        .iter()
+        .filter(|package| is_cuda_runtime_package(&package.url))
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        !packages.is_empty(),
+        "no CUDA runtime packages are pinned for this platform"
+    );
+
+    let client = reqwest::Client::builder()
+        .user_agent("gemma-on-device-cuda-runtime")
+        .timeout(Duration::from_secs(900))
+        .build()?;
+    for package in packages {
+        download_and_extract_runtime_package(app, &client, package, stage).await?;
+    }
+    anyhow::ensure!(
+        cuda_runtime_is_ready_without_marker(stage),
+        "downloaded CUDA runtime is missing required cuBLAS libraries"
+    );
+    tokio::fs::write(stage.join("runtime-ready"), b"1.0\n").await?;
+    Ok(())
+}
+
+#[cfg(feature = "cuda")]
+fn is_cuda_runtime_package(url: &str) -> bool {
+    let url = url.to_ascii_lowercase();
+    url.contains("/nvidia_") || url.contains("/libcublas/")
+}
+
+#[cfg(feature = "cuda")]
+fn cuda_runtime_is_ready_without_marker(directory: &Path) -> bool {
+    #[cfg(target_os = "windows")]
+    let required = ["cublas64_13.dll", "cublasLt64_13.dll"];
+    #[cfg(target_os = "linux")]
+    let required = ["libcublas.so.13", "libcublasLt.so.13"];
+    required
+        .iter()
+        .all(|name| find_runtime_file(directory, name))
+}
+
+#[cfg(feature = "cuda")]
+async fn download_and_extract_runtime_package(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    package: &RuntimePackage,
+    stage: &Path,
+) -> Result<()> {
+    let filename = package
+        .url
+        .rsplit('/')
+        .next()
+        .filter(|name| {
+            !name.is_empty()
+                && name
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+        })
+        .context("invalid CUDA runtime package URL")?;
+    let archive_path = stage.join(filename);
+    let part_path = stage.join(format!("{filename}.part"));
+    let response = client.get(&package.url).send().await?.error_for_status()?;
+    let total = response.content_length();
+    let mut stream = response.bytes_stream();
+    let mut output = tokio::fs::File::create(&part_path).await?;
+    let mut hasher = Sha256::new();
+    let mut downloaded = 0_u64;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        output.write_all(&chunk).await?;
+        hasher.update(&chunk);
+        downloaded += chunk.len() as u64;
+        emit_cuda_progress(app, filename, downloaded, total, false, None);
+    }
+    output.flush().await?;
+    drop(output);
+    let actual = hex::encode(hasher.finalize());
+    anyhow::ensure!(
+        actual.eq_ignore_ascii_case(&package.sha256),
+        "SHA256 mismatch for {filename}"
+    );
+    tokio::fs::rename(&part_path, &archive_path).await?;
+
+    let destination = stage.to_path_buf();
+    let archive_for_extract = archive_path.clone();
+    tokio::task::spawn_blocking(move || {
+        extract_runtime_archive(&archive_for_extract, &destination)
+    })
+    .await??;
+    tokio::fs::remove_file(archive_path).await?;
+    emit_cuda_progress(app, filename, downloaded, total, true, None);
+    Ok(())
+}
+
+#[cfg(feature = "cuda")]
+fn extract_runtime_archive(archive_path: &Path, destination: &Path) -> Result<()> {
+    let file = std::fs::File::open(archive_path)?;
+    let mut archive = zip::ZipArchive::new(file)?;
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index)?;
+        let Some(relative) = entry.enclosed_name().map(|path| path.to_path_buf()) else {
+            continue;
+        };
+        if entry.is_dir() || !is_native_runtime_file(&relative) {
+            continue;
+        }
+        let output = destination.join(relative);
+        if let Some(parent) = output.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut file = std::fs::File::create(output)?;
+        std::io::copy(&mut entry, &mut file)?;
+    }
+    Ok(())
+}
+
+#[cfg(feature = "cuda")]
+fn is_native_runtime_file(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    #[cfg(target_os = "windows")]
+    let native = name.ends_with(".dll");
+    #[cfg(target_os = "linux")]
+    let native = name.ends_with(".so") || name.contains(".so.");
+    native
+        || ["license", "notice", "copying", "third_party"]
+            .iter()
+            .any(|part| name.contains(part))
+}
+
+#[cfg(feature = "cuda")]
+fn emit_cuda_progress(
+    app: &AppHandle,
+    file: &str,
+    downloaded: u64,
+    total: Option<u64>,
+    done: bool,
+    error: Option<String>,
+) {
+    let _ = app.emit(
+        "download-progress",
+        DownloadProgress {
+            file: format!("CUDA runtime: {file}"),
+            downloaded,
+            total,
+            percent: total.map(|total| {
+                if total == 0 {
+                    100.0
+                } else {
+                    downloaded as f64 * 100.0 / total as f64
+                }
+            }),
+            done,
+            error,
+        },
+    );
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DownloadProgress {
     pub file: String,
@@ -28,6 +282,15 @@ struct FileSpec {
 /// SHA256 hashes verified against the HF API (`lfs.oid`) and cross-checked by
 /// downloading `onnx/model_q4.onnx` locally. See models/README.md for details.
 const SHA_1B_TOKENIZER: &str = "55da1312bdf1d7d8fe8d9d1b3eed04086261149e6034e0ac3f8c633b67f5aac8";
+const SHA_1B_INT4_ONNX: &str = "69686023e5892376e38fcbcdd0c77af432c55b3bcd03aee6d561bd1f04507da0";
+const SHA_1B_INT4_DATA: &str = "c2370070be257a98d50e17d81be13e18304c39e7e6d9d1416f8f883681d2a17b";
+
+pub async fn verify_default_model_files(model_dir: &Path) -> Result<()> {
+    verify_sha256(&model_dir.join("gemma-3-1b-it-int4.onnx"), SHA_1B_INT4_ONNX).await?;
+    verify_sha256(&model_dir.join("model_q4.onnx_data"), SHA_1B_INT4_DATA).await?;
+    verify_sha256(&model_dir.join("tokenizer.json"), SHA_1B_TOKENIZER).await?;
+    Ok(())
+}
 
 fn variant_specs(variant: &str) -> Result<(Vec<FileSpec>, &'static str)> {
     match variant {

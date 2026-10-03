@@ -10,7 +10,7 @@ This file defines operational rules for agents/contributors in `gemma-on-device`
 
 ## Tech Stack (Fixed)
 
-- **Rust**: `ort =2.0.0-rc.13` (`half` feature, EPs: `cuda`/`coreml`/`directml`/`nnapi`/`tensorrt`/`xnnpack`), `tokenizers 0.22`, `tauri 2.12`, `tauri-plugin-opener 2.7`, `tokio full`, `reqwest 0.12` (`rustls-tls` + `stream`), `anyhow`, `ndarray 0.16`
+- **Rust**: `ort =2.0.0-rc.13` (`half` feature; desktop editions: CUDA/CoreML/WebGPU with CPU fallback; Linux ROCm worker uses ORT 1.22.1), `tokenizers 0.23`, `tauri 2.12`, `tauri-plugin-opener 2.7`, `tokio full`, `reqwest 0.12` (`rustls-tls` + `stream`), `anyhow`, `ndarray 0.17`
 - **JS**: `Bun 1.3.14` (package manager + runtime), `React 19`, `Vite 7.3.6`, `TypeScript 5.8`, `@tauri-apps/api 2.12`, `@tauri-apps/plugin-opener 2.7`, `@tauri-apps/cli 2.12`
 - **Build**: `vite.config.ts` uses `port 1420 strictPort`, `host TAURI_DEV_HOST`, `frontendDist ../dist`; `tauri.conf.json` uses `beforeDevCommand: bun run dev`
 - **JS execution**: `package.json:scripts` call `vite` directly. Run with `bun run dev` / `bun run build`. Do NOT use `bunx --bun vite`.
@@ -95,7 +95,7 @@ Follow global `~/.config/opencode/AGENTS.md`:
 
 ## Mobile
 
-- EPs in `src-tauri/Cargo.toml:31` are enabled via `cargo tauri build -- --features cuda`. Default is CPU.
+- Desktop editions are built with `bun run tauri:cuda`, `bun run tauri:rocm`, or `bun run tauri:coreml`; `scripts/prepare_runtime.py` stages the pinned ORT and WebGPU libraries under ignored `runtime-artifacts/`. CUDA NVIDIA user-space libraries are fetched with SHA256 verification on first real inference and stored in app data. ROCm uses an isolated ORT 1.22.1 worker process while the app retains ORT 1.30.0 for WebGPU/CPU fallback. CI builds Windows/Linux CUDA, Linux ROCm, and Apple Silicon CoreML bundles and uploads each as a separate 7-day Actions artifact. Default remains CPU.
 - Android: `cargo ndk`, `aarch64-linux-android` etc.; iOS: `aarch64-apple-ios`
 - CI builds Android ARM64 APK/AAB on `master` pushes, pull requests, and manual runs. When `ANDROID_KEY_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and `ANDROID_STORE_PASSWORD` are available as repository secrets, CI signs the packages; otherwise it builds unsigned packages and reports that mode. GitHub withholds these secrets from fork pull requests. Unsigned APKs require signing before device installation.
 - CI builds an unsigned iOS ARM64 Release IPA with Tauri `--no-sign` on `master` pushes, pull requests, and manual runs. AltStore Classic signs it during sideloading, so no iOS signing secrets are required. Mobile artifacts are retained for seven days.
