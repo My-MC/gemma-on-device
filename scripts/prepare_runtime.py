@@ -113,10 +113,9 @@ def main() -> None:
     destination.mkdir(parents=True)
     extracted: list[Path] = []
     for package in LOCK["targets"][key]["packages"]:
-        archive = fetch(package)
         if edition == "cuda" and is_cuda_runtime_package(package):
             continue
-        extracted.extend(extract(archive, destination))
+        extracted.extend(extract(fetch(package), destination))
 
     if edition == "rocm":
         rocm_root = destination / "rocm"
