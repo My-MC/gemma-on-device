@@ -211,8 +211,9 @@ bun run tauri:coreml     # macOS 14+ Apple Silicon: CoreML → WebGPU → CPU
 ```
 
 CUDA and CoreML use official ONNX Runtime and WebGPU packages pinned in
-`scripts/runtime_lock.json`. `scripts/prepare_runtime.py` verifies every archive,
-extracts native libraries and notices, and creates a SHA256 manifest under
+`scripts/runtime_lock.json`. `scripts/prepare_runtime.py` verifies downloaded
+archives, extracts the bundled native libraries and notices, and creates a
+SHA256 manifest under
 `runtime-artifacts/`. The bundle builder rechecks every staged file. Local builds
 need Python 3.12 and Bun; CI prepares all runtime editions in the same workflow
 and uploads four separate 7-day artifacts. No project GitHub Release is used as
@@ -224,7 +225,8 @@ user-space libraries, including cuBLAS, on the first inference. The downloads
 are SHA256-verified and kept in the app data directory. Users do not need to
 install the CUDA Toolkit separately; a compatible NVIDIA GPU driver remains a
 host prerequisite. If the download fails, inference continues through WebGPU
-and CPU when the model supports those providers.
+and CPU when the model supports those providers. CUDA dependencies are omitted
+from build-time downloads and fetched only by the installed app on first use.
 Windows builds may also require the current Microsoft Visual C++ Redistributable
 x64. CoreML targets macOS 14 or newer on Apple Silicon; CoreML itself is
 provided by the operating system. The WebGPU provider remains bundled in every
