@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
@@ -37,6 +37,156 @@ type BenchResult = {
   is_mock: boolean;
   timestamp: string;
 };
+
+const MODEL_VARIANTS = [
+  { value: "1b-int4", label: "1B INT4 (推奨, ~1.2GB, community ONNX)" },
+  { value: "1b-int8", label: "1B INT8 (~1.5GB)" },
+  { value: "3n-e2b-int4", label: "3n E2B INT4 (モバイル最適化, 実験的)" },
+] as const;
+
+function ModelVariantSelect({
+  value,
+  onChange,
+  disabled,
+  labelId,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  disabled: boolean;
+  labelId: string;
+}) {
+  const id = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const listboxRef = useRef<HTMLDivElement>(null);
+  const selectedIndex = Math.max(0, MODEL_VARIANTS.findIndex((option) => option.value === value));
+  const [activeIndex, setActiveIndex] = useState(selectedIndex);
+  const [open, setOpen] = useState(false);
+  const selectedOption = MODEL_VARIANTS[selectedIndex];
+
+  useEffect(() => {
+    if (!open) return;
+
+    setActiveIndex(selectedIndex);
+    listboxRef.current?.focus();
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [open, selectedIndex]);
+
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
+
+  const openMenu = () => {
+    if (disabled) return;
+    setActiveIndex(selectedIndex);
+    setOpen(true);
+  };
+
+  const closeMenu = (restoreFocus: boolean) => {
+    setOpen(false);
+    if (restoreFocus) triggerRef.current?.focus();
+  };
+
+  const chooseOption = (index: number) => {
+    const option = MODEL_VARIANTS[index];
+    if (!option) return;
+    onChange(option.value);
+    closeMenu(true);
+  };
+
+  const handleListboxKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        setActiveIndex((index) => Math.min(index + 1, MODEL_VARIANTS.length - 1));
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        setActiveIndex((index) => Math.max(index - 1, 0));
+        break;
+      case "Home":
+        event.preventDefault();
+        setActiveIndex(0);
+        break;
+      case "End":
+        event.preventDefault();
+        setActiveIndex(MODEL_VARIANTS.length - 1);
+        break;
+      case "Enter":
+      case " ":
+        event.preventDefault();
+        chooseOption(activeIndex);
+        break;
+      case "Escape":
+        event.preventDefault();
+        closeMenu(true);
+        break;
+      case "Tab":
+        closeMenu(false);
+        break;
+    }
+  };
+
+  return (
+    <div className="model-variant-select" ref={rootRef}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="model-variant-trigger"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={`${id}-listbox`}
+        aria-labelledby={`${labelId} ${id}-selected`}
+        disabled={disabled}
+        onClick={() => (open ? closeMenu(false) : openMenu())}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            openMenu();
+          }
+        }}
+      >
+        <span id={`${id}-selected`}>{selectedOption.label}</span>
+        <span className="model-variant-caret" aria-hidden="true" />
+      </button>
+      {open && (
+        <div
+          ref={listboxRef}
+          id={`${id}-listbox`}
+          className="model-variant-listbox"
+          role="listbox"
+          tabIndex={0}
+          aria-labelledby={labelId}
+          aria-activedescendant={`${id}-option-${activeIndex}`}
+          onKeyDown={handleListboxKeyDown}
+        >
+          {MODEL_VARIANTS.map((option, index) => (
+            <div
+              id={`${id}-option-${index}`}
+              key={option.value}
+              className="model-variant-option"
+              role="option"
+              aria-selected={index === selectedIndex}
+              data-active={index === activeIndex}
+              onPointerDown={(event) => event.preventDefault()}
+              onPointerMove={() => setActiveIndex(index)}
+              onClick={(event) => {
+                event.stopPropagation();
+                chooseOption(index);
+              }}
+            >
+              {option.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 type SystemInfo = {
   platform: string;
@@ -301,14 +451,15 @@ export default function App() {
         <div className="download-panel">
           <div className="download-title">画面からダウンロード</div>
           <div className="download-controls">
-            <label>
-              Variant
-              <select value={variant} onChange={(e) => setVariant(e.target.value)} disabled={downloading}>
-                <option value="1b-int4">1B INT4 (推奨, ~1.2GB, community ONNX)</option>
-                <option value="1b-int8">1B INT8 (~1.5GB)</option>
-                <option value="3n-e2b-int4">3n E2B INT4 (モバイル最適化, 実験的)</option>
-              </select>
-            </label>
+            <div className="download-variant-field">
+              <span id="download-variant-label">Variant</span>
+              <ModelVariantSelect
+                value={variant}
+                onChange={setVariant}
+                disabled={downloading}
+                labelId="download-variant-label"
+              />
+            </div>
             <button className="primary" onClick={handleDownload} disabled={downloading}>
               {downloading ? "ダウンロード中…" : "モデルをダウンロード"}
             </button>
