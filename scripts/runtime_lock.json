@@ -13,6 +13,7 @@
         {"url":"https://files.pythonhosted.org/packages/7b/cc/be7fe31058127336a66c88414a2ecc6beecf680baf85994a43eaf292b202/nvidia_cufft-12.4.0.43-py3-none-win_amd64.whl","sha256":"4ff7075f2d0b5f69291f70938d37a86ec632cbe5747184c74ba1f50f17accacc"},
         {"url":"https://files.pythonhosted.org/packages/e2/d4/f59ab342b82ff05ff27d674acd470ba625d788bf71338f7da6c89669d6b9/nvidia_curand-10.4.4.72-py3-none-win_amd64.whl","sha256":"e0bce83e083ef25976ee74f59e8f067c15149a74538f1be6c2462e286e7c9c68"},
         {"url":"https://files.pythonhosted.org/packages/87/6a/e55ff0ac26a5c6e2b21f41c9d04ad096b4ed6da593fba7e25845c61b0532/nvidia_cudnn_cu13-9.27.0.42-py3-none-win_amd64.whl","sha256":"7d96f634adafd55c72231eb0500ca77ab109ec8ebff7b33000b76e081bc4558e"},
+        {"url":"https://developer.download.nvidia.com/compute/cuda/redist/libcublas/windows-x86_64/libcublas-windows-x86_64-13.8.0.4-archive.zip","sha256":"0974318e9861a61cb9091cf7de8d4c2880e9787fe311cb4bcbd08865663c5f43"},
         {"url":"https://files.pythonhosted.org/packages/72/7c/c44bd7277afafed9de262a23baec4dc8dcf7ecbb1b9ecb228821442d1e9b/nvidia_nvjitlink-13.4.92-py3-none-win_amd64.whl","sha256":"b286f3a4f227a9363efdec263c7b91788cef1478d2b8a5fa8bab7f3e82ff82fd"}
       ]
     },
