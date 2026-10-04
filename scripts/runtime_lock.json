@@ -101,16 +101,22 @@
           "sha256": "fd54b314ea385bcecac69ab431f020ba503e3878dad4ebb645fec5a24b041242"
         },
         {
-          "url": "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1/onnxruntime_migraphx-1.23.2-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
-          "sha256": "663bff4dc3f72582d69f12ad073eb5695dfb526d574376cc8e5b161c7d2f0f08"
-        },
-        {
           "url": "https://files.pythonhosted.org/packages/97/9c/d37bc05c56c3d91d44585db7bebbf0f068ece5d01df5b3898449771d4bf2/onnxruntime_ep_webgpu-0.3.0-py3-none-manylinux_2_28_x86_64.whl",
           "sha256": "865ce82d80319d7f259a4a65e66e32834f0f117db55ae4377868b4f28016e7bf"
         }
       ]
     }
   },
-  "migraphx_ort": "1.23.2",
-  "rocm_version": "7.2.1"
+  "rocm_version": "7.2.1",
+  "migraphx_plugin": {
+    "commit": "87198f3ac6315d7fe7a0e10454fb29a21eae3021",
+    "source": {
+      "url": "https://codeload.github.com/onnxruntime/onnxruntime-ep-amdgpu/zip/87198f3ac6315d7fe7a0e10454fb29a21eae3021",
+      "sha256": "1098e7c34423d921258aa41dd34e14779b6352375132e75ac2d1c55b1b927e56"
+    },
+    "sdk": {
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-linux-x64-1.30.0.tgz",
+      "sha256": "a5ed5a3cac51fbb2e90da632ae43d19212faaa20e76484e62bcb7c23ddb3b3fd"
+    }
+  }
 }

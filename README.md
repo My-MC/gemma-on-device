@@ -239,7 +239,9 @@ bun run tauri:coreml     # macOS 14+ Apple Silicon: CoreML → WebGPU → CPU
 
 CUDA uses ONNX Runtime 1.30.0, CUDA 13, and cuDNN 9. The CUDA edition bundles ONNX Runtime, WebGPU, cuBLAS, and other pinned NVIDIA user-space libraries. Users need a compatible NVIDIA GPU driver; the CUDA Toolkit is not required. Windows may also require the current Microsoft Visual C++ Redistributable x64.
 
-The Linux AMD edition uses AMD's ONNX Runtime 1.23.2 MIGraphX provider and ROCm 7.2.1 user-space libraries, bundled with the application. It runs in a separate `gemma-migraphx-worker` process because its ORT version differs from the app's ORT 1.30.0 WebGPU/CPU runtime. Users need a compatible AMD GPU and kernel driver, but do not need to install ROCm or MIGraphX separately. Windows is not included because AMD does not provide the supported MIGraphX stack there.
+The Linux AMD edition bundles the standalone [MIGraphX plugin EP](https://github.com/onnxruntime/onnxruntime-ep-amdgpu) and ROCm 7.2.1 user-space libraries. MIGraphX, WebGPU, and CPU use the same ONNX Runtime 1.30.0 process and cached inference session. Users need a compatible AMD GPU and kernel driver; ROCm and MIGraphX do not need to be installed separately. This project's AMD bundle currently targets Linux x64; the upstream plugin also has Windows build support.
+
+Building this edition requires ROCm 7.2.1 with `migraphx`, `migraphx-dev`, and `hip-dev`, CMake 4.2+, Ninja, patch, and patchelf. `scripts/build_migraphx_plugin.py` builds the SHA256-pinned upstream source against the pinned ORT 1.30.0 SDK. Packaging includes the HIPRTC driver, ROCm shared libraries and kernel data, and relocates their library search paths. Set `ROCM_PATH` if ROCm is installed outside `/opt/rocm`; `GEMMA_MIGRAPHX_EP_LIBRARY` overrides the plugin path for development.
 
 CoreML targets macOS 14 or newer on Apple Silicon. CoreML uses CPU and GPU where supported; unsupported graph nodes can fall back to CPU. Set `GEMMA_COREML_PROFILE=1` when launching the app to log per-operator hardware assignment. The WebGPU provider remains bundled in each GPU edition for fallback.
 
@@ -317,7 +319,7 @@ and 2–3 GB of working memory during inference.
 Execution providers in `src-tauri/Cargo.toml`:
 
 - Windows/Linux CUDA edition: `desktop-cuda`
-- Linux AMD edition: `desktop-migraphx` (isolated MIGraphX worker with bundled ROCm user-space runtime)
+- Linux AMD edition: `desktop-migraphx` (standalone plugin EP with bundled ROCm user-space runtime)
 - Apple Silicon macOS edition: `desktop-coreml`
 - Android: `nnapi` / `xnnpack`
 - iOS: `coreml` requires an explicit Cargo feature (enabled in CI, GPU + CPU fallback)

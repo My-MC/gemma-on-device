@@ -106,7 +106,7 @@ Agents may work in a Git worktree. Each worktree is an isolated working director
 
 ## Mobile
 
-- Desktop editions use `bun run tauri:cuda`, `bun run tauri:migraphx`, or `bun run tauri:coreml`; `scripts/prepare_runtime.py` downloads SHA256-pinned packages and stages CUDA/cuBLAS or ROCm/MIGraphX user-space libraries under ignored `runtime-artifacts/`. Linux MIGraphX runs in an isolated ORT 1.23.2 worker. CI uploads each built edition as a separate 7-day Actions artifact. Default remains CPU.
+- Desktop editions use `bun run tauri:cuda`, `bun run tauri:migraphx`, or `bun run tauri:coreml`; `scripts/prepare_runtime.py` downloads SHA256-pinned packages and stages CUDA/cuBLAS or ROCm/MIGraphX user-space libraries under ignored `runtime-artifacts/`. Linux MIGraphX is a standalone plugin built from SHA256-pinned source against ORT 1.30.0; build dependencies include ROCm 7.2.1 development packages, CMake 4.2+, Ninja, patch, and patchelf. HIPRTC and GPU kernel data are bundled. CI uploads each built edition as a separate 7-day Actions artifact. Default remains CPU.
 - Generated Android/iOS projects are ignored and initialized with `bun run tauri android init` / `bun run tauri ios init`.
 - Android: `cargo ndk`, `aarch64-linux-android` etc.; iOS: `aarch64-apple-ios`
 - Mobile providers (`nnapi`, `xnnpack`, `coreml`) require explicit Cargo features; CoreML is not automatically enabled. iOS config sets minimum version 15.1 and a development team that must match the contributor's signing setup.

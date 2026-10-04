@@ -40,11 +40,11 @@ chrono = { version = "0.4", features = ["serde"] }
 default = []
 # Execution Providers - enable per target
 cuda = ["ort/cuda", "load-dynamic"]
-migraphx-worker = []
+migraphx = ["load-dynamic"]
 webgpu = []
 desktop-cuda = ["cuda", "webgpu"]
 desktop-coreml = ["coreml", "webgpu"]
-desktop-migraphx = ["migraphx-worker", "webgpu", "load-dynamic"]
+desktop-migraphx = ["migraphx", "webgpu"]
 tensorrt = ["ort/tensorrt"]
 coreml = ["ort/coreml", "load-dynamic"]
 directml = ["ort/directml"]

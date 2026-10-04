@@ -2,8 +2,8 @@ mod inference;
 
 #[cfg(any(
     all(feature = "cuda", feature = "coreml"),
-    all(feature = "cuda", feature = "migraphx-worker"),
-    all(feature = "coreml", feature = "migraphx-worker")
+    all(feature = "cuda", feature = "migraphx"),
+    all(feature = "coreml", feature = "migraphx")
 ))]
 compile_error!("select exactly one desktop primary execution provider feature");
 

@@ -2,8 +2,6 @@ use anyhow::Result;
 use ort::session::{builder::GraphOptimizationLevel, Session};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-#[cfg(feature = "migraphx-worker")]
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -23,8 +21,6 @@ pub struct ModelInfo {
 pub struct AppState {
     pub session: Arc<Mutex<Option<InferenceSession>>>,
     pub model_integrity: tokio::sync::OnceCell<()>,
-    #[cfg(feature = "migraphx-worker")]
-    pub migraphx_disabled: AtomicBool,
     pub model_dir: PathBuf,
     pub runtime_dir: PathBuf,
 }
@@ -42,8 +38,8 @@ pub struct InferenceSession {
 pub fn preferred_execution_provider() -> &'static str {
     if cfg!(feature = "coreml") {
         "CoreML (GPU + CPU fallback)"
-    } else if cfg!(feature = "migraphx-worker") {
-        "MIGraphX (GPU + WebGPU + CPU fallback)"
+    } else if cfg!(feature = "migraphx") {
+        "MIGraphX"
     } else if cfg!(feature = "tensorrt") {
         "TensorRT"
     } else if cfg!(feature = "cuda") {
@@ -66,8 +62,6 @@ impl AppState {
         Self {
             session: Arc::new(Mutex::new(None)),
             model_integrity: tokio::sync::OnceCell::new(),
-            #[cfg(feature = "migraphx-worker")]
-            migraphx_disabled: AtomicBool::new(false),
             model_dir,
             runtime_dir,
         }
@@ -230,6 +224,8 @@ enum Provider {
         feature = "xnnpack"
     ))]
     Primary,
+    #[cfg(feature = "migraphx")]
+    MIGraphX,
     #[cfg(feature = "webgpu")]
     WebGpu,
 }
@@ -246,6 +242,8 @@ impl Provider {
                 feature = "xnnpack"
             ))]
             Self::Primary => preferred_execution_provider(),
+            #[cfg(feature = "migraphx")]
+            Self::MIGraphX => "MIGraphX",
             #[cfg(feature = "webgpu")]
             Self::WebGpu => "WebGPU",
         }
@@ -265,6 +263,8 @@ fn configured_providers() -> Vec<Provider> {
         feature = "xnnpack"
     ))]
     providers.push(Provider::Primary);
+    #[cfg(feature = "migraphx")]
+    providers.push(Provider::MIGraphX);
     #[cfg(feature = "webgpu")]
     providers.push(Provider::WebGpu);
     providers
@@ -287,6 +287,14 @@ fn create_session_with_provider(
             feature = "xnnpack"
         ))]
         Provider::Primary => create_primary_session(builder, model_path, runtime_dir),
+        #[cfg(feature = "migraphx")]
+        Provider::MIGraphX => create_plugin_session(
+            builder,
+            model_path,
+            "MIGraphXExecutionProvider",
+            "MIGraphXExecutionProvider",
+            migraphx_library_path(runtime_dir),
+        ),
         #[cfg(feature = "webgpu")]
         Provider::WebGpu => create_webgpu_session(builder, model_path, runtime_dir),
     }
@@ -355,18 +363,16 @@ fn create_webgpu_session(
     create_plugin_session(
         builder,
         model_path,
-        runtime_dir,
         "WebGPU",
         "WebGpuExecutionProvider",
         webgpu_library_path(runtime_dir),
     )
 }
 
-#[cfg(feature = "webgpu")]
+#[cfg(any(feature = "webgpu", feature = "migraphx"))]
 fn create_plugin_session(
     builder: ort::session::builder::SessionBuilder,
     model_path: &Path,
-    _runtime_dir: &Path,
     registration_name: &'static str,
     execution_provider_name: &str,
     library_path: PathBuf,
@@ -374,12 +380,19 @@ fn create_plugin_session(
     use ort::environment::Environment;
     use std::sync::OnceLock;
 
+    #[cfg(feature = "webgpu")]
     static WEBGPU_REGISTRATION: OnceLock<std::result::Result<(), String>> = OnceLock::new();
+    #[cfg(feature = "migraphx")]
+    static MIGRAPHX_REGISTRATION: OnceLock<std::result::Result<(), String>> = OnceLock::new();
     let env = Environment::current().map_err(|e| anyhow::anyhow!("{}", e))?;
-    if registration_name != "WebGPU" {
-        anyhow::bail!("unsupported plugin registration: {registration_name}");
-    }
-    let registration = WEBGPU_REGISTRATION.get_or_init(|| {
+    let registration_cache = match registration_name {
+        #[cfg(feature = "webgpu")]
+        "WebGPU" => &WEBGPU_REGISTRATION,
+        #[cfg(feature = "migraphx")]
+        "MIGraphXExecutionProvider" => &MIGRAPHX_REGISTRATION,
+        _ => anyhow::bail!("unsupported plugin registration: {registration_name}"),
+    };
+    let registration = registration_cache.get_or_init(|| {
         env.register_ep_library(registration_name, &library_path)
             .map(|_| ())
             .map_err(|e| e.to_string())
@@ -404,6 +417,14 @@ fn create_plugin_session(
         .map_err(|e| anyhow::anyhow!("{}", e))?
         .commit_from_file(model_path)
         .map_err(|e| anyhow::anyhow!("{}", e))
+}
+
+#[cfg(feature = "migraphx")]
+fn migraphx_library_path(runtime_dir: &Path) -> PathBuf {
+    if let Ok(path) = std::env::var("GEMMA_MIGRAPHX_EP_LIBRARY") {
+        return PathBuf::from(path);
+    }
+    runtime_dir.join("migraphx/libmigraphx-ep.so")
 }
 
 #[cfg(feature = "webgpu")]
@@ -446,6 +467,36 @@ pub fn resolve_model_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "migraphx")]
+    #[test]
+    #[ignore = "requires the staged native MIGraphX bundle"]
+    fn migraphx_plugin_runtime_smoke() {
+        use ort::{environment::Environment, value::Tensor};
+        let runtime = PathBuf::from(std::env::var("GEMMA_PLUGIN_TEST_RUNTIME").unwrap());
+        assert!(ort::init_from(runtime.join("libonnxruntime.so"))
+            .unwrap()
+            .commit());
+        let env = Environment::current().unwrap();
+        env.register_ep_library("MIGraphXExecutionProvider", migraphx_library_path(&runtime))
+            .unwrap();
+        // Enumerating devices must work even on CI runners without an AMD GPU.
+        let _devices = env.devices().collect::<Vec<_>>();
+        // A minimal float Identity graph exercises the same ORT core's CPU path.
+        let model = [
+            8, 8, 58, 59, 10, 16, 10, 1, 120, 18, 1, 121, 34, 8, 73, 100, 101, 110, 116, 105, 116,
+            121, 18, 5, 115, 109, 111, 107, 101, 90, 15, 10, 1, 120, 18, 10, 10, 8, 8, 1, 18, 4,
+            10, 2, 8, 1, 98, 15, 10, 1, 121, 18, 10, 10, 8, 8, 1, 18, 4, 10, 2, 8, 1, 66, 2, 16,
+            13,
+        ];
+        let mut session = Session::builder()
+            .unwrap()
+            .commit_from_memory(&model)
+            .unwrap();
+        let input = Tensor::from_array(([1], vec![42_f32])).unwrap();
+        let output = session.run(ort::inputs![input]).unwrap();
+        assert_eq!(output[0].try_extract_tensor::<f32>().unwrap().1, &[42_f32]);
+    }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64", feature = "coreml"))]
     #[test]

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { createHash } from "node:crypto";
-import { chmod, cp, mkdir, readFile, rm } from "node:fs/promises";
+import { cp, mkdir, readFile, rm } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 
 type Edition = "cuda" | "migraphx" | "coreml";
@@ -10,7 +10,7 @@ type RuntimeManifest = {
   ort_version: string;
   webgpu_ep_version: string;
   primary_ep_version: string;
-  migraphx_ort_version?: string;
+  migraphx_plugin_commit?: string;
   files: Record<string, string>;
 };
 
@@ -91,9 +91,18 @@ if (edition === "cuda") {
       : "libonnxruntime_providers_cuda.so",
   );
 }
-if (edition === "migraphx" && manifest.migraphx_ort_version !== "1.23.2") {
-  throw new Error(
-    `MIGraphX worker requires pinned ORT 1.23.2, got ${manifest.migraphx_ort_version}`,
+if (edition === "migraphx") {
+  const lock = JSON.parse(
+    await readFile(join(repo, "scripts/runtime_lock.json"), "utf8"),
+  );
+  if (manifest.migraphx_plugin_commit !== lock.migraphx_plugin.commit) {
+    throw new Error(
+      "MIGraphX plugin source revision does not match runtime lock",
+    );
+  }
+  requiredRuntime.push(
+    "migraphx/libmigraphx-ep.so",
+    "migraphx/bin/migraphx-hiprtc-driver",
   );
 }
 for (const required of requiredRuntime) {
@@ -148,78 +157,6 @@ await Bun.write(
 const cargoFeature = `desktop-${edition}`;
 const config = "src-tauri/tauri.gpu.conf.json";
 const bundleArgs = process.platform === "linux" ? ["--bundles", "deb"] : [];
-if (edition === "migraphx") {
-  const migraphxOrt = join(staged, "migraphx", "libonnxruntime.so.1.23.2");
-  const workerFmt = Bun.spawn(
-    [
-      "cargo",
-      "fmt",
-      "--manifest-path",
-      "migraphx-worker/Cargo.toml",
-      "--",
-      "--check",
-    ],
-    { cwd: repo, env: process.env, stdout: "inherit", stderr: "inherit" },
-  );
-  const workerFmtStatus = await workerFmt.exited;
-  if (workerFmtStatus !== 0)
-    throw new Error(
-      `MIGraphX worker formatting check failed with status ${workerFmtStatus}`,
-    );
-  const workerClippy = Bun.spawn(
-    [
-      "cargo",
-      "clippy",
-      "--manifest-path",
-      "migraphx-worker/Cargo.toml",
-      "--",
-      "-D",
-      "warnings",
-    ],
-    {
-      cwd: repo,
-      env: { ...process.env, ORT_LIB_LOCATION: migraphxOrt },
-      stdout: "inherit",
-      stderr: "inherit",
-    },
-  );
-  const workerClippyStatus = await workerClippy.exited;
-  if (workerClippyStatus !== 0)
-    throw new Error(
-      `MIGraphX worker clippy failed with status ${workerClippyStatus}`,
-    );
-  const worker = Bun.spawn(
-    [
-      "cargo",
-      "build",
-      "--manifest-path",
-      "migraphx-worker/Cargo.toml",
-      "--release",
-    ],
-    {
-      cwd: repo,
-      env: { ...process.env, ORT_LIB_LOCATION: migraphxOrt },
-      stdout: "inherit",
-      stderr: "inherit",
-    },
-  );
-  const workerStatus = await worker.exited;
-  if (workerStatus !== 0)
-    throw new Error(`MIGraphX worker build failed with status ${workerStatus}`);
-  const workerPath = join(staged, "migraphx-worker");
-  await cp(
-    join(repo, "migraphx-worker", "target", "release", "gemma-migraphx-worker"),
-    workerPath,
-  );
-  await chmod(workerPath, 0o755);
-  manifest.files["migraphx-worker"] = createHash("sha256")
-    .update(Buffer.from(await Bun.file(workerPath).arrayBuffer()))
-    .digest("hex");
-  await Bun.write(
-    join(staged, "runtime-manifest.json"),
-    JSON.stringify(manifest, null, 2) + "\n",
-  );
-}
 const proc = Bun.spawn(
   [
     "bun",
