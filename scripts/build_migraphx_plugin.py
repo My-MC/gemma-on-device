@@ -94,7 +94,9 @@ def bundle_rocm(rocm: Path, destination: Path, plugin: Path) -> None:
     for path in destination.rglob("*"):
         if path.is_file() and not path.is_symlink():
             with path.open("rb") as stream:
-                if stream.read(4) == b"\x7fELF":
+                header = stream.read(20)
+                # GPU code objects are ELF too; patch only Linux x64 host binaries.
+                if header[:4] == b"\x7fELF" and header[18:20] == b"\x3e\x00":
                     libraries.append(path)
     dirs = sorted({p.parent for p in libraries} | {destination.parent})
     for binary in libraries:
