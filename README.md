@@ -1,6 +1,6 @@
 # Gemma On Device — ort × Tauri × React (Bun)
 
-A Tauri application to validate whether Rust `ort` (ONNX Runtime) can run Gemma mobile models across platforms. Desktop (Win / Mac / Linux) and Mobile (Android / iOS) are validated in parallel with in-app model download, streaming inference, and benchmarking.
+A Tauri application to validate whether Rust `ort` (ONNX Runtime) can run Gemma mobile models across platforms, with in-app model download, streaming inference, and benchmarking. CI builds desktop and mobile packages; device/GPU inference validation requires manual checks.
 
 - **Product name**: `Gemma On Device` / **Package name**: `gemma-on-device` / **Identifier**: `com.gemmaondevice.app`
 - **Validation goal**: whether `ort` can run Gemma ONNX on each OS / execution provider, and to quantify speed / memory / compatibility
@@ -10,19 +10,21 @@ A Tauri application to validate whether Rust `ort` (ONNX Runtime) can run Gemma 
 | Layer | Technology | Version | Role |
 | --- | --- | --- | --- |
 | Rust | `ort` | `2.0.0-rc.13` (`half` feature) | ONNX Runtime wrapper, CPU by default, EPs switched via Cargo features |
-| Rust | `tokenizers` | `0.22` | Gemma SentencePiece JSON (`tokenizer.json`) |
+| Rust | `tokenizers` | `0.23` | Gemma SentencePiece JSON (`tokenizer.json`) |
 | Rust | `tauri` | `2.12` + `tauri-build 2.7` | Desktop / mobile Rust backend |
 | Rust | `tokio` `futures` `reqwest` `tokio-util` | - | Async runtime + in-app download (`rustls-tls`) |
 | Rust | `serde` `anyhow` `ndarray` | - | IPC, errors, tensor creation (`[1, seq_len]` shape) |
 | JS runtime | `Bun` | `1.3.14` | Package manager and runtime (Node-compatible, `package.json:scripts` run `vite` via `bun run`) |
-| Frontend | `React` | `19.1.0` + `react-dom 19.1.0` | UI |
-| Frontend | `Vite` | `7.3.6` + `@vitejs/plugin-react 4.7` | Build, `devUrl http://localhost:1420` |
-| Frontend | `TypeScript` | `5.8.3` | Types |
+| Frontend | `React` | `^19.3.0` + `react-dom ^19.3.0` | UI |
+| Frontend | `Vite` | `^8.3.0` + `@vitejs/plugin-react ^6.1.1` | Build, `devUrl http://localhost:1420` |
+| Frontend | `TypeScript` | `~7.0.2` | Types |
 | Tauri JS | `@tauri-apps/api` `cli` | `2.12` | `invoke` / `listen` / `emit` |
 | Tauri JS plugin | `@tauri-apps/plugin-opener` | `2.7` | Open URLs and files |
 | Models | Gemma 3 1B INT4 / 3n E2B INT4 | `onnx-community` | Community ONNX, INT4 quantized |
 
 **JS execution**: `package.json:scripts` call `vite` directly and are run via `bun run dev` / `bun run build`. Do not use `bunx --bun vite`.
+
+Dependency manifests and lockfiles are the version sources; Bun 1.3.14 is the version used in CI.
 
 ## Architecture
 
@@ -46,12 +48,12 @@ A Tauri application to validate whether Rust `ort` (ONNX Runtime) can run Gemma 
                                                                     CPU / DirectML / CUDA / CoreML / NNAPI
 ```
 
-**Inference fallback**: if `models/gemma-3-1b-it-int4.onnx` + `tokenizer.json` are missing, the app validates the UI pipeline via `mock_generate` and automatically switches to real inference once the files are placed.
+**Inference fallback**: if the default 1B INT4 graph or tokenizer is missing, the app validates the UI pipeline via `mock_generate`. Real inference uses the graph, `model_q4.onnx_data`, and the 1B tokenizer; errors on that path are returned to the caller. Downloading INT8 or 3n does not switch the inference model. Model status checks graph/tokenizer existence only, and the inference path does not re-verify hashes before loading. Manually verify files copied or changed outside the downloader.
 
 **Model paths**:
 
-- Desktop dev: `resolve_model_dir()` → `models/` at project root (created by `bun run download:model`)
-- Desktop installed / Mobile: `app.path().app_data_dir().join("models")` (`src-tauri/src/lib.rs:122` in `setup`). `models/` is `.gitignore`d, see `models/README.md`.
+- Desktop debug builds: existing project `models/` resolved by `resolve_model_dir()` is preferred.
+- Desktop release / Mobile: `app.path().app_data_dir().join("models")` via `src-tauri/src/lib.rs:resolve_model_dir_for_app()`. If app-data resolution fails, it falls back to `resolve_model_dir()`. Model binaries are ignored; see `models/README.md`.
 
 ## Project Structure
 
@@ -93,7 +95,7 @@ A Tauri application to validate whether Rust `ort` (ONNX Runtime) can run Gemma 
 
 ### 1) System (WSL Ubuntu 24.04 LTS / Linux)
 
-Tauri 2 Linux prerequisites — `tauri info` should show `webkit2gtk-4.1: 2.52.3` as ✓:
+Install the Linux system packages needed by this project's Tauri build; versions vary by distribution:
 
 ```bash
 sudo apt update
@@ -101,7 +103,7 @@ sudo apt install -y \
   libwebkit2gtk-4.1-dev \
   build-essential curl wget file \
   libssl-dev libgtk-3-dev \
-  libayatana-appindicator3-dev librsvg2-dev patchelf
+  libayatana-appindicator3-dev librsvg2-dev patchelf pkg-config
 # pkg-config is required (openssl-sys, gobject-sys)
 ```
 
@@ -110,9 +112,11 @@ For WSLg (Windows 11) GUI: run `wsl --update && wsl --shutdown`, then verify `ec
 ### 2) Rust / Bun
 
 ```bash
-rustc --version  # 1.77+ (verified on 1.95)
-bun --version    # 1.3.x
+rustc --version  # use current stable, as CI does
+bun --version    # CI uses 1.3.14
 ```
+
+The app manifest declares Rust 1.77, but CI does not test that minimum against the current lockfile. Install `clippy` and `rustfmt` for the contributor quality gates.
 
 Install Bun via `curl -fsSL https://bun.sh/install | bash`.
 
@@ -143,7 +147,7 @@ GDK_BACKEND=x11 WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER
 
 # Production preview
 bun run build && bun run preview
-# → http://localhost:4173
+# → http://localhost:1420 (override with VITE_PREVIEW_PORT)
 ```
 
 Closing the window prints `error: script "dev" exited with code 143` — this is Vite's child process exiting on `SIGTERM` and is expected.
@@ -173,9 +177,11 @@ Downloads are **SHA256-verified** (see `models/README.md` and `CONTRIBUTING.md`)
 
 1. Start the app with `bun run tauri dev`
 2. **Models** → **Download from UI** → select variant
-   - `1b-int4` (recommended, ~1.2 GB, `onnx-community/gemma-3-1b-it-ONNX`)
+   - `1b-int4` (recommended, ~0.88 GB including tokenizer, `onnx-community/gemma-3-1b-it-ONNX`)
    - `1b-int8` / `3n-e2b-int4` (experimental)
-3. **Download model** → per-file progress bars (`download-progress` event) → `model ✓` on completion → generation switches to real inference
+3. **Download model** → per-file progress bars (`download-progress` event). Only the default 1B INT4 files are used for generation. Completion/status does not certify inference readiness; the Rust downloader can continue after a failed 3n external-data download.
+
+Downloading 3n replaces the shared `tokenizer.json` with a different tokenizer. Re-download 1B before 1B inference. Restart an app that already cached a session after replacing model files.
 
 **CLI**:
 
@@ -197,7 +203,9 @@ Verify manually after download:
 
 ```bash
 sha256sum models/gemma-3-1b-it-int4.onnx
-# compare with expected hash in models/README.md
+sha256sum models/model_q4.onnx_data
+sha256sum models/tokenizer.json
+# compare all three with expected hashes in models/README.md
 ```
 
 `models/` is `.gitignore`d. The app works in mock mode without models for UI validation.
@@ -219,7 +227,7 @@ bun run check:ort             # rustc/cargo/ort/models/tauri-cli diagnostics
 ### Build
 
 ```bash
-bun run build                 # vite only
+bun run build                 # TypeScript check + Vite frontend build
 bun run tauri build           # Tauri bundle (target/release/bundle, workspace root)
 # With execution provider
 bun run tauri build -- --features cuda
@@ -254,16 +262,11 @@ Resolution order used by `src-tauri/src/lib.rs:init_ort()`:
    resource mapping exists outside Windows).
 3. `ort::init()` fallback (lets `ort` use its own DLL search rules).
 
-For a manual Windows desktop build, place the matching DLL next to the binary
-or point `ORT_DYLIB_PATH` at it. The version must match the `ort` wheel —
-`ort 2.0.0-rc.13` vendors ONNX Runtime 1.22.0:
+For Windows checks/development, stage the runtime pinned by `scripts/download_ort_dll.ts`. The script SHA256-verifies its downloaded archive. Use `load-dynamic` when launching/building, matching CI. The build hook stages the DLL automatically for `tauri build`; direct Cargo checks and `tauri dev` need it staged first:
 
 ```bash
-# x64
-curl -fsSL -o /tmp/ort.zip https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-win-x64-1.22.0.zip
-echo '174c616efc0271194488642a72f1a514e01487da4dfe84c49296d66e40ebe0da  /tmp/ort.zip' | sha256sum -c -
-unzip -j /tmp/ort.zip 'onnxruntime-win-x64-1.22.0/lib/onnxruntime.dll' -d src-tauri/target/release/ 2>/dev/null \
-  || unzip -j /tmp/ort.zip 'onnxruntime-win-x64-1.22.0/lib/onnxruntime.dll' -d target/release/
+bun run download:ort-dll
+bun run tauri dev -- --features load-dynamic
 bun run tauri build -- --features load-dynamic
 ```
 
@@ -271,12 +274,12 @@ bun run tauri build -- --features load-dynamic
 
 ### In-App Download
 
-`src-tauri/src/lib.rs:122` uses `app_data_dir` in `setup`, so in-app download works on Android/iOS:
+`src-tauri/src/lib.rs:resolve_model_dir_for_app()` uses `app_data_dir/models` for mobile downloads:
 
 - Android: `/data/data/com.gemmaondevice.app/files/models`
 - iOS: `NSApplicationSupport/models`
 
-On desktop dev, if `models/` exists at project root it is preferred for compatibility with `bun run download:model`.
+Non-mobile debug builds prefer existing project `models/` for compatibility with `bun run download:model`; desktop release builds use app data.
 
 ### Build
 
@@ -303,27 +306,24 @@ iOS creates an unsigned ARM64 release IPA without signing secrets. Download the 
 
 The generated Xcode project lives in `src-tauri/gen/apple`. Set
 `bundle.iOS.developmentTeam` in `src-tauri/tauri.conf.json` to the team reported
-by `bun run tauri info`. The checked-in project targets iOS 15.1 because the
-prebuilt ONNX Runtime objects require iOS 15.1 or later. If `tauri ios init` is
-run again with Tauri CLI 2.11.4, verify that `project.yml` and `Podfile` still
-specify 15.1 before building.
+by `bun run tauri info` for signed builds. `src-tauri/tauri.conf.json` sets minimum iOS version 15.1. The generated project is ignored; after initialization, verify that its deployment settings still specify 15.1 before building.
 
 For a physical device, connect and unlock the iPhone, trust the Mac, enable
 Developer Mode, and confirm that it appears under `xcrun xctrace list devices`.
 The first launch has no bundled model; use the in-app download button to place
-the INT4 model in the app sandbox. Allow about 1.2 GB of storage for model files
+the INT4 model in the app sandbox. The pinned files total about 0.88 GB; allow additional download space
 and 2–3 GB of working memory during inference.
 
-Execution providers in `src-tauri/Cargo.toml:31`:
+Execution providers in `src-tauri/Cargo.toml`:
 
 - Win: `directml` / `cuda` / `tensorrt`
 - Apple Silicon Mac: `coreml` is enabled automatically (GPU + CPU fallback)
 - Intel Mac: `coreml` (explicit Cargo feature)
 - Linux: `cuda`
 - Android: `nnapi` / `xnnpack`
-- iOS: `coreml` is enabled automatically (GPU + CPU fallback)
+- iOS: `coreml` requires an explicit Cargo feature (enabled in CI, GPU + CPU fallback)
 
-Memory estimate: 1B INT4 is 1.2 GB on disk + 2-3 GB RAM at inference → 4 GB+ device recommended. `3n-e2b` is optimized for mobile with PLE / MatFormer.
+Memory estimate: 1B INT4 files total about 0.88 GB on disk + roughly 2–3 GB RAM at inference → 4 GB+ device recommended. `3n-e2b` is downloadable, but its embedding pipeline is not implemented.
 
 ## Tauri Commands
 
@@ -337,7 +337,7 @@ Defined in `src-tauri/src/lib.rs:1`:
 - `bench_inference {iterations}` — `BenchResult`
 - `download_model {variant}` — `string[]` (saved paths), emits `download-progress` / `download-complete`
 
-`src-tauri/capabilities/default.json` is `core:default` + `opener:default` and allows custom commands.
+`src-tauri/capabilities/default.json` grants `core:default` + `opener:default` to the `main` window. App commands are registered with `generate_handler!` in `src-tauri/src/lib.rs:run()`.
 
 ## Scripts
 
@@ -345,7 +345,7 @@ Defined in `src-tauri/src/lib.rs:1`:
 | --- | --- |
 | `bun run download:model` | `scripts/download_model.ts` (Bun, onnx-community) |
 | `bun run export:onnx` | `scripts/export_onnx.py` (`optimum-cli export onnx --quant int4`) |
-| `bun run bench` | `scripts/bench.ts` CLI bench |
+| `bun run bench` | `scripts/bench.ts`, always a mock loop; use app `bench_inference` for real measurements |
 | `bun run check:ort` | `scripts/check_ort.ts` environment diagnostics |
 
 ## Development Workflow
@@ -354,35 +354,54 @@ This project follows **GitHub Flow**. See `CONTRIBUTING.md` for the full workflo
 
 - Never commit directly to `master`. Create a feature branch per task from `master` (`feat/<scope>`, `fix/<scope>`, `chore/<scope>`, `docs/<scope>`).
 - Keep commits atomic. Each commit touching `src-tauri/` must pass the quality gates locally before commit.
-- Open a PR via `gh pr create` for every branch (Conventional prefix `feat:` / `fix:` / `chore:` / `docs:`). CI must be green before merge. Merge only via GitHub PR (Squash or Merge).
+- Open a PR via `gh pr create` for every branch (Conventional prefix `feat:` / `fix:` / `chore:` / `docs:`). CI must be green before merge. Merge only via GitHub PR: use a Merge Commit for large feature, behavior, architecture, or multi-area changes; use Squash Merge for dependency updates and small, focused maintenance PRs.
 
 ### Git Worktrees
 
-Each worktree is an isolated working directory, so dependencies and build artifacts are not shared with other worktrees. Run `bun install` inside each worktree and let `src-tauri/target/` build independently. Create sibling worktrees from `master` with the normal `git worktree add` workflow.
+Each worktree is an isolated working directory. Run `bun install` inside each worktree; Cargo builds use root `target/`. The DLL script stages files under root `target/release/`, so do not override `CARGO_TARGET_DIR` for those builds. Create sibling worktrees from updated `origin/master` with the normal `git worktree add` workflow.
 
 Parallel worktrees must avoid port collisions. Set `VITE_PORT`, `VITE_HMR_PORT`, and `VITE_PREVIEW_PORT` to values that do not overlap with other worktrees or the default `1420` / `1421` ports. `vite.config.ts` reads all three variables.
 
 For Tauri desktop dev in a worktree, use `scripts/worktree-dev.ts`. It reads `VITE_PORT`, writes a temporary JSON Merge Patch to `src-tauri/tauri.worktree.conf.json` that overrides only `build.devUrl`, and runs `tauri dev --config src-tauri/tauri.worktree.conf.json`. The generated patch file is gitignored, so do not commit it.
 
-Models live in each worktree's own `models/` directory. You can download per worktree with `bun run download:model`, or save disk space by symlinking `models/` to a shared external directory that already holds the verified ONNX files and `tokenizer.json`. Only symlink a directory you trust, because every worktree re-verifies hashes before loading.
+Models live in each worktree's own `models/` directory. You can download per worktree with `bun run download:model`, or save disk space by symlinking `models/` to a trusted shared external directory holding verified ONNX files and `tokenizer.json`. The inference path does not re-verify hashes; manually check files copied or changed outside the downloader.
 
 Mobile generated directories under `src-tauri/gen/` are also per-worktree. After creating a worktree, regenerate mobile projects with `bun run tauri ios init` or `bun run tauri android init` before running `bun run tauri ios dev` or `bun run tauri android dev`.
 
 ### Per-Task Quality Gates (Mandatory)
 
-After every task (feature, fix, refactor, docs touching `src-tauri/`), run in order:
+After every frontend or backend task (feature, fix, or refactor), run the applicable gates before committing, opening a PR, or marking the task complete. Do not defer them to the end of a multi-task session.
+
+| Changed area | Required gates |
+| --- | --- |
+| Frontend, TypeScript scripts, or root JSON/TypeScript config (including JS dependencies/lockfile) | `bun run check` (Biome) → `bun run build` (TypeScript check + production frontend build) |
+| Rust backend: `src-tauri/`, Rust dependencies/lockfile or workspace config | Cargo check → clippy → fmt check → `bun run build` |
+| Both frontend and backend | Cargo gates → `bun run check` → `bun run build` |
+| Documentation only | Referenced path/command checks and `git diff --check` |
+
+For frontend-only tasks, run:
+
+```bash
+bun run check
+bun run build
+```
+
+For backend or combined tasks, run in order:
 
 ```bash
 cargo check --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check  # if diff: cargo fmt --manifest-path src-tauri/Cargo.toml
+bun run check  # required when frontend, TypeScript scripts, or root JSON/TypeScript config changed
 bun run build  # also runs tsc
 ```
 
 - `cargo check` must be clean
 - `cargo clippy -- -D warnings` must be clean
 - `cargo fmt -- --check` must exit 0
-- If `src-tauri/` was not touched, `cargo` steps may be skipped but `bun run build` is still required
+- `bun run check` and `bun run build` must exit 0 after every frontend task, including styling/assets and frontend dependency/config changes. Biome checks lint/format/imports; the build runs `tsc` and `vite build`. A working dev server alone does not satisfy these gates.
+- Frontend-only tasks may skip Cargo gates. Docs-only tasks may skip compile gates. Script changes need the relevant checks for the affected frontend/backend build path.
+- CI already runs frontend build, desktop Cargo gates/bundles on Linux/Windows/macOS, and Android/iOS package builds. Device/GPU inference validation remains manual.
 
 ## Troubleshooting
 
@@ -397,8 +416,8 @@ Validation project. Gemma models are under the Gemma License, ONNX Runtime is MI
 
 ## Development Notes
 
-- `ort` `Tensor::from_array` uses `([1, seq_len], Vec<i64>)` to avoid `ndarray` version mismatch (`src-tauri/src/inference/generate.rs:124`)
-- Convert `ort::Error` to `anyhow` via `map_err(|e| anyhow::anyhow!("{}", e))?` to avoid `Send/Sync` issues (`src-tauri/src/inference/session.rs:99`)
+- Follow tuple + vector `Tensor::from_array` construction in `src-tauri/src/inference/generate.rs`: `([1, seq_len], Vec<i64>)`.
+- Follow the existing `ort` error conversion at the `anyhow` boundary in `src-tauri/src/inference/session.rs`: `map_err(|e| anyhow::anyhow!("{}", e))?`.
 - `SessionBuilder::with_execution_providers` moves `self`, so reassign: `let mut builder = builder.with_execution_providers(...)?`
 
 ## Next Validation

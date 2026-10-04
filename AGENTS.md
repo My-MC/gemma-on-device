@@ -1,26 +1,28 @@
 # AGENTS.md — gemma-on-device
 
-This file defines operational rules for agents/contributors in `gemma-on-device`. In addition to the global rules in `~/.config/opencode/AGENTS.md`, it specifies project-specific constraints.
+This file defines repository-specific operational rules for agents/contributors in `gemma-on-device`. Apply any global agent instructions supplied by your environment as well; this repository does not require a local `~/.config/opencode/AGENTS.md` file.
 
 ## Project Overview
 
 - **Purpose**: Validate whether Rust `ort` (ONNX Runtime) can run Gemma mobile models (3 1B INT4 → 3n E2B INT4) for multi-platform inference via Tauri
 - **Package name**: `gemma-on-device` / **identifier**: `com.gemmaondevice.app` / **productName**: `Gemma On Device`
-- **Initial directory name**: `ort_mobile_test` (Cargo workspace root, but crate name is `gemma-on-device`)
+- **Workspace**: root `Cargo.toml` contains the `src-tauri` crate.
 
-## Tech Stack (Fixed)
+## Tech Stack
 
-- **Rust**: `ort =2.0.0-rc.13` (`half` feature, EPs: `cuda`/`coreml`/`directml`/`nnapi`/`tensorrt`/`xnnpack`), `tokenizers 0.22`, `tauri 2.12`, `tauri-plugin-opener 2.7`, `tokio full`, `reqwest 0.12` (`rustls-tls` + `stream`), `anyhow`, `ndarray 0.16`
-- **JS**: `Bun 1.3.14` (package manager + runtime), `React 19`, `Vite 7.3.6`, `TypeScript 5.8`, `@tauri-apps/api 2.12`, `@tauri-apps/plugin-opener 2.7`, `@tauri-apps/cli 2.12`
-- **Build**: `vite.config.ts` uses `port 1420 strictPort`, `host TAURI_DEV_HOST`, `frontendDist ../dist`; `tauri.conf.json` uses `beforeDevCommand: bun run dev`
+Use `package.json`, `src-tauri/Cargo.toml`, and the lockfiles as the version sources. Update this summary when dependencies change.
+
+- **Rust**: `ort 2.0.0-rc.13` (`half` feature; resolved by `Cargo.lock`), `tokenizers 0.23`, `tauri 2.12`, `tauri-plugin-opener 2.7`, `tokio full`, `reqwest 0.12` (`rustls-tls` + `stream`), `anyhow`, `ndarray 0.17`. Execution providers are selected with Cargo features; Apple Silicon macOS builds include CoreML automatically.
+- **JS**: CI uses `Bun 1.3.14` (package manager + runtime); manifest versions are `React ^19.3.0`, `Vite ^8.3.0`, `@vitejs/plugin-react ^6.1.1`, `TypeScript ~7.0.2`, `@tauri-apps/api ^2.12.0`, `@tauri-apps/plugin-opener ^2.7.0`, `@tauri-apps/cli ^2.12.0`.
+- **Build**: `vite.config.ts` reads `VITE_PORT` (default `1420`), `VITE_HMR_PORT` (default `1421`, used with `TAURI_DEV_HOST`), and `VITE_PREVIEW_PORT` (default `1420`); dev/preview use `strictPort`. `src-tauri/tauri.conf.json` owns `frontendDist: ../dist`, `devUrl: http://localhost:1420`, and `beforeDevCommand: bun run dev`.
 - **JS execution**: `package.json:scripts` call `vite` directly. Run with `bun run dev` / `bun run build`. Do NOT use `bunx --bun vite`.
 
 ## Directory Conventions
 
 - `src/` — React (Bun + Vite), `src/App.tsx` is the main screen for download/inference/bench
 - `src-tauri/` — Rust, `src/lib.rs` hosts Tauri commands + `setup` (app_data_dir), `src/inference/{session,tokenizer,generate,bench,download}.rs`
-- `models/` — `.gitignore`, see `models/README.md`. Expected files: `gemma-3-1b-it-int4.onnx` + `tokenizer.json`. Falls back to `generate.rs:mock_generate` when not present
-- `scripts/` — `download_model.ts` (Bun), `bench.ts`, `check_ort.ts`, `export_onnx.py` (optimum)
+- `models/` — model binaries are ignored; see `models/README.md`. Real inference uses `gemma-3-1b-it-int4.onnx` + `model_q4.onnx_data` + the 1B `tokenizer.json`. Missing graph/tokenizer triggers `generate.rs:mock_generate`; errors on the real path are returned to the caller. INT8 and 3n downloads do not select a different inference model.
+- `scripts/` — model download/export, mock CLI bench, environment checks, Windows DLL staging, and the worktree dev helper.
 - `Cargo.toml` (workspace root) is `members = ["src-tauri"]`, `resolver = "2"` only
 
 ## Development Commands
@@ -44,20 +46,22 @@ bun run download:model     # 1b-int4 (onnx-community)
 bun run bench              # CLI bench
 bun run check:ort          # environment diagnostics
 cargo check --manifest-path src-tauri/Cargo.toml
-cargo clippy --manifest-path src-tauri/Cargo.toml
+cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 cargo build --manifest-path src-tauri/Cargo.toml
 ```
 
 - `bunx tauri` is equivalent to `bun run tauri`, but this project standardizes on `bun run tauri`
 - On WSL, force software rendering: `GDK_BACKEND=x11 WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 LIBGL_ALWAYS_SOFTWARE=1 bun run tauri dev`
+- On Windows, stage the runtime with `bun run download:ort-dll` before Cargo checks, and use `bun run tauri dev -- --features load-dynamic` / `bun run tauri build -- --features load-dynamic`.
+- `bun run bench` always measures a mock loop. Use the app's `bench_inference` command for real inference measurements.
 
 ## Development Workflow (GitHub Flow, Mandatory)
 
-- **Branching**: Never commit directly to `main`. Create a feature branch per task from `main` (`feat/<scope>`, `fix/<scope>`, `chore/<scope>`, `docs/<scope>`).
+- **Branching**: The default branch is `master`. Never commit directly to it. Create a feature branch per task from updated `origin/master` (`feat/<scope>`, `fix/<scope>`, `chore/<scope>`, `docs/<scope>`).
 - **Commits**: Keep commits atomic and reviewable. Each commit that touches `src-tauri/` must have passed `cargo check`, `cargo clippy -- -D warnings`, `cargo fmt -- --check` locally.
 - **PRs**: Open a PR via `gh pr create` for every branch. Title uses conventional prefix (`feat:`, `fix:`, `chore:`, `docs:`). Fill in summary, verification, and risk. CI must be green before merge.
-- **Merging**: Do NOT merge directly to `main` locally (`git merge main` is for updating feature branch only). Merge only via GitHub PR after CI passes. Use a Merge Commit for large feature, behavior, or architecture changes and PRs spanning multiple areas. Use Squash Merge for library/dependency updates and small, focused maintenance PRs. Do NOT use `git push origin main` from a feature branch.
+- **Merging**: Merge only via GitHub PR after CI passes. Use a Merge Commit for large feature, behavior, or architecture changes and PRs spanning multiple areas. Use Squash Merge for library/dependency updates and small, focused maintenance PRs. Use `git merge origin/master` only to update a feature branch. Do not merge feature work into local `master` or push directly to `origin/master`.
 - **Docs**: Update `AGENTS.md` / `CONTRIBUTING.md` / `README.md` when workflow, quality gates, or model handling changes.
 - See `CONTRIBUTING.md` for full contributor workflow including SHA256 model verification.
 
@@ -66,50 +70,53 @@ cargo build --manifest-path src-tauri/Cargo.toml
 Agents may work in a Git worktree. Each worktree is an isolated working directory, so dependencies and build artifacts are not shared with the main worktree or other worktrees.
 
 - Run `bun install` in the active worktree. `node_modules/` is not shared across worktrees.
-- Rust build artifacts under `src-tauri/target/` are per-worktree. Do not reuse or assume a shared `target/` directory.
-- When running dev servers, respect `VITE_PORT` and `VITE_HMR_PORT` if they are set. The default Vite port is `1420`, but parallel worktrees must avoid collisions by honoring the environment variables.
+- The Cargo workspace writes to root `target/`, including `target/release/bundle/`. This is per-worktree by default; do not assume shared artifacts or override `CARGO_TARGET_DIR` when using the DLL script that stages files in root `target/release/`.
+- Avoid port collisions with `VITE_PORT`, `VITE_HMR_PORT`, and `VITE_PREVIEW_PORT`. For Tauri, use `VITE_PORT=1422 bun run scripts/worktree-dev.ts` to also override `build.devUrl`; the generated `src-tauri/tauri.worktree.conf.json` is ignored.
+- Mobile projects under ignored `src-tauri/gen/` must be initialized in each worktree. Models are also per-worktree unless you explicitly use a trusted shared directory via a symlink.
 
 ## Coding Conventions
 
 - **Comments**: Keep concise. Do not write long-form thinking in code comments.
 - **Output**: Direct and objective. Use emojis only when requested.
 - **References**: When referencing functions/code, include `file_path:line_number` (e.g., `src-tauri/src/lib.rs:101`)
-- **File operations**: Use `Read` before `Edit`. Use `Write` only for new files. Use `Bash` only for state-changing operations (`git`/`mkdir`/`rm`/`mv`). Use `Grep`/`Glob` for search and `context-mode_ctx_execute` for analysis.
-- **ort error**: `ort::Error` is not `Send/Sync`, so convert to `anyhow` via `map_err(|e| anyhow::anyhow!("{}", e))?` (see `src-tauri/src/inference/session.rs:99`)
-- **Tensor**: Use `Tensor::from_array(([1, seq_len], Vec<i64>))` to avoid `ndarray` version mismatch (`src-tauri/src/inference/generate.rs:124`)
+- **File operations**: Read files before editing. Use the environment's native edit/write tools for persistent changes, `rg`/file search for discovery, and context-mode for analysis or large outputs. Shell is suitable for state changes and short observations.
+- **ort error**: Follow the existing string conversion at the `anyhow` boundary: `map_err(|e| anyhow::anyhow!("{}", e))?` in `src-tauri/src/inference/session.rs`.
+- **Tensor**: Follow the tuple + vector construction in `src-tauri/src/inference/generate.rs`: `Tensor::from_array(([1, seq_len], Vec<i64>))`.
 - **SessionBuilder**: `with_execution_providers` moves `self`, so reassign: `let mut builder = builder.with_execution_providers(...)?`
 
 ## Tauri Specifics
 
-- `src-tauri/src/lib.rs:run()` resolves `app.path().app_data_dir().join("models")` in `setup`. If `models/` exists in the project (desktop dev), it is preferred; otherwise `app_data` is used (Mobile/installed).
-- `src-tauri/capabilities/default.json` is `core:default` + `opener:default` and allows custom commands (`generate`, `download_model`, etc.).
+- `src-tauri/src/lib.rs:resolve_model_dir_for_app()` prefers existing project `models/` only for non-mobile debug builds; release/mobile builds use `app_data_dir/models`. If app-data resolution fails, it falls back to `resolve_model_dir()`.
+- `src-tauri/capabilities/default.json` grants `core:default` + `opener:default` to the `main` window. App commands are registered in `src-tauri/src/lib.rs:run()` via `generate_handler!`.
 - `src-tauri/src/inference/download.rs` streams via `reqwest` (`rustls-tls`) and emits `app.emit("download-progress")` / `emit("download-complete")`, listened to in `src/App.tsx`. Downloads are verified via SHA256 (`models/README.md`, see `CONTRIBUTING.md`).
-- **SHA256**: Every model file (`*.onnx`, `*.onnx_data`, `tokenizer.json`) must be SHA256-verified after download. Expected hashes live in `models/README.md`. Verification is mandatory before `Session::commit_from_file`.
-- **ORT DLL**: Windows-only concern — `src-tauri/tauri.windows.conf.json` owns the `bundle.resources` entry; `scripts/download_ort_dll.ts` stages a SHA256-verified copy (auto-run by `beforeBuildCommand`). Linux/macOS builds require no DLL.
+- **SHA256**: Verify every model file (`*.onnx`, `*.onnx_data`, `tokenizer.json`) after download and before loading. Keep `models/README.md`, Rust `variant_specs`, and Bun `SHA256` in sync. Downloaders verify hashes, but the current inference path does not re-verify them before `Session::commit_from_file`. Manually verify files copied or changed outside the downloader. Status commands currently check graph/tokenizer existence only, not hashes or external data readiness.
+- **Tokenizers**: Downloading 3n replaces `tokenizer.json` with a different hash. Restore the 1B tokenizer with `bun run download:model:1b` before 1B inference; restart an app that already cached a session after replacing model files.
+- **3n download limitation**: The Rust downloader treats failed 3n `.onnx_data` downloads as optional and can emit `download-complete` for a partial download. The Bun downloader fails instead. Neither completion nor status proves 3n inference readiness.
+- **Runtime resources**: Windows builds stage `target/release/onnxruntime.dll` via `scripts/download_ort_dll.ts` and `tauri.windows.conf.json`. Default `beforeBuildCommand` runs DLL staging (a no-op outside Windows) and the frontend build. Linux/macOS builds use the linked runtime and have no DLL bundle resource.
 
 ## Context7 / Context-Mode (Mandatory)
 
-Follow global `~/.config/opencode/AGENTS.md`:
-
-- **Context7**: Always use `resolve-library-id` → `query-docs` when documentation for a library/framework/SDK is needed. Applies to React, Vite, Tauri, ort, tokenizers, reqwest, etc. Query by concept, not single words.
+- **Context7**: For library/framework/SDK/API/CLI/cloud documentation, run `npx ctx7@latest library <official-name> "<specific concept>"`, choose the returned `/org/project` ID, then run `npx ctx7@latest docs <id> "<specific concept>"`. Resolve first unless a valid ID was provided. Use at most three commands per question; never include credentials. Prefer this over web search. Repository review, refactoring, scripts written from scratch, and business-logic debugging do not require a docs query. Use an execution context with network access according to the environment's permission policy. On quota errors, report the failure and suggest `npx ctx7@latest login` or `CONTEXT7_API_KEY`.
 - **Context-Mode**:
   - Think in Code: aggregate/analyze via `ctx_execute` with only `console.log()` remaining in output
-  - `curl`/`wget`/`fetch('http` is blocked → use `ctx_fetch_and_index` / `ctx_execute` with `fetch`
+  - Fetch external documents with `ctx_fetch_and_index`; process API responses with `ctx_execute` and `fetch` rather than returning raw responses
   - File analysis → `ctx_execute_file`, bulk collection → `ctx_batch_execute` (concurrency 1-8)
   - Shell is for short observations only (`git`/`mkdir` etc.); otherwise use sandbox execution
   - Write artifacts to files, return path + 1-line description. Keep long thinking in private reasoning.
 
 ## Mobile
 
-- EPs in `src-tauri/Cargo.toml:31` are enabled via `cargo tauri build -- --features cuda`. Default is CPU.
+- Generated Android/iOS projects are ignored and initialized with `bun run tauri android init` / `bun run tauri ios init`.
 - Android: `cargo ndk`, `aarch64-linux-android` etc.; iOS: `aarch64-apple-ios`
+- Mobile providers (`nnapi`, `xnnpack`, `coreml`) require explicit Cargo features; CoreML is not automatically enabled. iOS config sets minimum version 15.1 and a development team that must match the contributor's signing setup.
 - CI builds Android ARM64 APK/AAB on `master` pushes, pull requests, and manual runs. When `ANDROID_KEY_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and `ANDROID_STORE_PASSWORD` are available as repository secrets, CI signs the packages; otherwise it builds unsigned packages and reports that mode. GitHub withholds these secrets from fork pull requests. Unsigned APKs require signing before device installation.
-- CI builds an unsigned iOS ARM64 Release IPA with Tauri `--no-sign` on `master` pushes, pull requests, and manual runs. AltStore Classic signs it during sideloading, so no iOS signing secrets are required. Mobile artifacts are retained for seven days.
-- 1B INT4 is 1.2GB + 2-3GB RAM at inference → 4GB+ device recommended. 3n-E2B is mobile-optimized.
+- CI builds an unsigned iOS ARM64 Release IPA with Tauri `--no-sign` on `master` pushes, pull requests, and manual runs. AltStore Classic signs it during sideloading, so no iOS signing secrets are required. Mobile artifacts are retained for seven days. Device inference validation remains manual.
+- The pinned 1B INT4 graph/data/tokenizer total about 0.88 GB; allow additional download space and roughly 2–3 GB RAM for inference (4 GB+ device recommended). 3n is downloadable but its embedding pipeline is not implemented.
 
 ## Verification
 
-- **CI minimum**: `bun run build` and `cargo check --manifest-path src-tauri/Cargo.toml` must pass. `bun run tauri dev` succeeds when `WindowId` is registered in `weston.log`. `libEGL/MESA ZINK` warnings and `exit 143` (vite SIGTERM) are expected and benign.
+- **CI**: `.github/workflows/ci.yml` runs on pushes/PRs to `master` and manual runs: frontend build; desktop Cargo check/clippy/fmt and bundles on Linux/Windows/macOS; Android ARM64 APK/AAB; and unsigned iOS ARM64 IPA. Bundle artifacts are retained for seven days. It does not prove hardware acceleration or device inference.
+- **GUI smoke check**: Confirm the window renders and commands respond. `weston.log` is specific to WSLg; a registered window alone does not validate inference. Rendering warnings are acceptable only when the app works; Vite exit 143 on normal window close is expected.
 
 ### Per-Task Quality Gates (Mandatory)
 
@@ -118,19 +125,37 @@ Follow global `~/.config/opencode/AGENTS.md`:
 - Frontend, TypeScript scripts, and root JSON/TypeScript configuration changes must pass `bun run check` and `bun run build`. CI runs `bun run check:ci` before the frontend build.
 - `biome.json` enables recommended lint rules, formatting, and import organization for `src/`, TypeScript scripts, and root JSON/TypeScript configuration. Biome respects `.gitignore`; Rust uses Clippy and rustfmt.
 
-After **every task** (feature, fix, refactor, docs change that touches `src-tauri/`), run the following **in order** and ensure they pass before marking the task complete. Do not batch them at the end of a multi-task session.
+After **every frontend or backend task** (feature, fix, or refactor), run the applicable gates below and ensure they pass before committing, opening a PR, or marking the task complete. Do not batch them at the end of a multi-task session.
+
+| Changed area | Required gates |
+| --- | --- |
+| Frontend, TypeScript scripts, or root JSON/TypeScript config (including JS dependencies/lockfile) | `bun run check` (Biome) → `bun run build` (TypeScript check + production frontend build) |
+| Rust backend: `src-tauri/`, Rust dependencies/lockfile or workspace config | Cargo check → clippy → fmt check → `bun run build` |
+| Both frontend and backend | Cargo gates → `bun run check` → `bun run build` |
+| Documentation only | Referenced path/command checks and `git diff --check` |
+
+For frontend-only tasks, run:
+
+```bash
+bun run check
+bun run build
+```
+
+For backend or combined tasks, run these **in order**:
 
 ```bash
 cargo check --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check  # if diff, run: cargo fmt --manifest-path src-tauri/Cargo.toml
+bun run check  # required when frontend, TypeScript scripts, or root JSON/TypeScript config changed
 bun run build  # also covers tsc
 ```
 
 - `cargo check`: must be clean (warnings about dead code are allowed only if `#[allow(dead_code)]` is justified)
 - `cargo clippy`: must be clean with `-D warnings`. Fix with `cargo clippy --fix --allow-dirty` if needed
 - `cargo fmt`: must be clean (`--check` exits 0). Always run `cargo fmt` before commit; do not hand-format
-- If `src-tauri/` was not touched, `cargo` steps may be skipped, but `bun run build` is still required for `src/` changes
+- `bun run check` and `bun run build` must exit 0 after every frontend task, including styling/assets and frontend dependency/config changes. Biome checks lint/format/imports; the build runs `tsc` and `vite build`. A working dev server alone does not satisfy these gates.
+- Frontend-only tasks may skip Cargo gates. Docs-only tasks may skip compile gates. Script changes need the relevant checks for the affected frontend/backend build path. For provider code, also run check/clippy with the affected Cargo feature on a supported host.
 
 ## Documentation
 
@@ -144,4 +169,4 @@ bun run build  # also covers tsc
 - Mixing `npm`/`pnpm`/`yarn` (Bun only)
 - Committing `models/*.onnx` (`.gitignore`)
 - Passing `Array2` directly to `ort`'s `ndarray` (version mismatch)
-- Direct `?` from `ort::Error` to `anyhow::Error` (Send/Sync error)
+- Bypassing the repository's explicit `ort` error conversion or download SHA256 checks
