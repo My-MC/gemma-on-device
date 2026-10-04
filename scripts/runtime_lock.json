@@ -109,10 +109,10 @@
   },
   "rocm_version": "7.2.1",
   "migraphx_plugin": {
-    "commit": "87198f3ac6315d7fe7a0e10454fb29a21eae3021",
+    "commit": "f3120284c97f64c790128a910e192d7fd81c9a8d",
     "source": {
-      "url": "https://codeload.github.com/onnxruntime/onnxruntime-ep-amdgpu/zip/87198f3ac6315d7fe7a0e10454fb29a21eae3021",
-      "sha256": "1098e7c34423d921258aa41dd34e14779b6352375132e75ac2d1c55b1b927e56"
+      "url": "https://codeload.github.com/onnxruntime/onnxruntime-ep-amdgpu/zip/f3120284c97f64c790128a910e192d7fd81c9a8d",
+      "sha256": "df9421434dd32b44a0c47e0740986be7c97cb12ed6d6c52c678353a18748c8e9"
     },
     "sdk": {
       "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-linux-x64-1.30.0.tgz",
