@@ -32,7 +32,6 @@ tokenizers = { version = "0.23", features = [] }
 ndarray = "0.17"
 sha2 = "0.11"
 hex = "0.4"
-zip = { version = "2", default-features = false, features = ["deflate"] }
 rand = "0.10"
 half = "2.3"
 chrono = { version = "0.4", features = ["serde"] }
@@ -41,11 +40,11 @@ chrono = { version = "0.4", features = ["serde"] }
 default = []
 # Execution Providers - enable per target
 cuda = ["ort/cuda", "load-dynamic"]
-rocm-worker = []
+migraphx-worker = []
 webgpu = []
 desktop-cuda = ["cuda", "webgpu"]
 desktop-coreml = ["coreml", "webgpu"]
-desktop-rocm = ["rocm-worker", "webgpu", "load-dynamic"]
+desktop-migraphx = ["migraphx-worker", "webgpu", "load-dynamic"]
 tensorrt = ["ort/tensorrt"]
 coreml = ["ort/coreml", "load-dynamic"]
 directml = ["ort/directml"]

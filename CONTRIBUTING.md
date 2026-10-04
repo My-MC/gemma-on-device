@@ -201,7 +201,7 @@ Rules:
 
 ## Mobile
 
-- Desktop editions use `bun run tauri:cuda`, `bun run tauri:migraphx`, and `bun run tauri:coreml`. Each requires a matching SHA256-verified runtime bundle; CI downloads source bundles from the configured GitHub Release and uploads each built app as a separate 7-day artifact. See README for package names and the runtime manifest contract.
+- Desktop editions use `bun run tauri:cuda`, `bun run tauri:migraphx`, and `bun run tauri:coreml`. Each downloads SHA256-pinned upstream packages and stages the required user-space libraries locally; Linux MIGraphX uses an isolated ORT 1.23.2 worker. CI stages the same packages and uploads each built app as a separate 7-day artifact. See README for details.
 
 - Android: `cargo ndk` targets `aarch64-linux-android` etc., with explicit `xnnpack`/`nnapi` features when needed. iOS: `aarch64-apple-ios`, with explicit `coreml` when needed. CoreML is not enabled automatically. See `README.md` for SDK setup.
 - Generated projects under `src-tauri/gen/` are ignored. iOS config sets minimum version 15.1; set `bundle.iOS.developmentTeam` to your own signing team before building.

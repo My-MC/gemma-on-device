@@ -15,7 +15,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:cuda": "bun scripts/build_tauri_edition.ts cuda",
-    "tauri:rocm": "bun scripts/build_tauri_edition.ts rocm",
+    "tauri:migraphx": "bun scripts/build_tauri_edition.ts migraphx",
     "tauri:coreml": "bun scripts/build_tauri_edition.ts coreml",
     "download:model": "bun scripts/download_model.ts",
     "download:model:1b": "bun scripts/download_model.ts --variant 1b-int4",

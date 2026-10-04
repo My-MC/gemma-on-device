@@ -50,16 +50,11 @@ def fetch(package: dict) -> Path:
 def selected(name: str) -> bool:
     low = name.lower()
     filename = PurePosixPath(low).name
-    if "pybind11_state" in filename or "migraphx" in filename:
+    if "pybind11_state" in filename:
         return False
     return low.endswith((".so", ".dylib", ".dll")) or ".so." in filename or any(
         key in filename for key in ("license", "notice", "copying", "third_party")
     )
-
-
-def is_cuda_runtime_package(package: dict) -> bool:
-    url = package["url"].lower()
-    return "/nvidia_" in url or "/libcublas/" in url
 
 
 def safe_destination(root: Path, name: str) -> Path:
@@ -94,16 +89,16 @@ def find_file(root: Path, predicate) -> Path:
 
 
 def main() -> None:
-    if len(sys.argv) != 2 or sys.argv[1] not in ("cuda", "coreml", "rocm"):
-        raise SystemExit("usage: python3 scripts/prepare_runtime.py <cuda|coreml|rocm>")
+    if len(sys.argv) != 2 or sys.argv[1] not in ("cuda", "coreml", "migraphx"):
+        raise SystemExit("usage: python3 scripts/prepare_runtime.py <cuda|coreml|migraphx>")
     edition = sys.argv[1]
     target = f"{platform.system().lower()}-{platform.machine().lower()}"
     target = {"windows-amd64": "win32-x64", "linux-x86_64": "linux-x64", "darwin-arm64": "macos-arm64"}.get(target, target)
     key = f"{target}-{edition}"
     if key not in LOCK["targets"]:
         raise RuntimeError(f"unsupported runtime target {key}")
-    if edition == "rocm" and target != "linux-x64":
-        raise RuntimeError("ROCm edition is supported on Linux x64 only")
+    if edition == "migraphx" and target != "linux-x64":
+        raise RuntimeError("MIGraphX edition is supported on Linux x64 only")
     if edition == "coreml" and target != "macos-arm64":
         raise RuntimeError("CoreML bundle targets Apple Silicon only")
 
@@ -113,23 +108,34 @@ def main() -> None:
     destination.mkdir(parents=True)
     extracted: list[Path] = []
     for package in LOCK["targets"][key]["packages"]:
-        if edition == "cuda" and is_cuda_runtime_package(package):
-            continue
-        extracted.extend(extract(fetch(package), destination))
+        package_destination = destination
+        if edition == "migraphx" and "onnxruntime_migraphx" in package["url"]:
+            package_destination = destination / "migraphx"
+            package_destination.mkdir(exist_ok=True)
+        extracted.extend(extract(fetch(package), package_destination))
 
-    if edition == "rocm":
-        rocm_root = destination / "rocm"
-        rocm_root.mkdir()
-        rocm_runtime = find_file(destination, lambda name: name == "libonnxruntime.so.1.22.1")
-        rel = rocm_runtime.relative_to(destination)
-        staged = safe_destination(rocm_root, rel.as_posix())
-        staged.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(rocm_runtime, staged)
-        rocm_private = destination / "onnxruntime_rocm.libs"
-        if rocm_private.exists():
-            target_private = rocm_root / "onnxruntime_rocm.libs"
-            shutil.move(rocm_private, target_private)
-        shutil.copy2(staged, rocm_root / "libonnxruntime.so.1.22.1")
+    if edition == "migraphx":
+        migraphx_root = destination / "migraphx"
+        migraphx_root.mkdir(exist_ok=True)
+        for name in ("libonnxruntime.so.1.23.2", "libonnxruntime_providers_migraphx.so"):
+            source = find_file(destination, lambda candidate, expected=name: candidate == expected)
+            shutil.copy2(source, migraphx_root / name)
+
+        rocm_path = Path(os.environ.get("ROCM_PATH", "/opt/rocm"))
+        rocm_lib = rocm_path / "lib"
+        if not rocm_lib.is_dir():
+            raise RuntimeError(f"ROCm user-space libraries are missing: {rocm_lib}; install MIGraphX/ROCm before packaging")
+        runtime_libraries = [path for path in rocm_lib.rglob("lib*.so*") if path.is_file()]
+        if not runtime_libraries:
+            raise RuntimeError(f"no ROCm shared libraries found in {rocm_lib}")
+        for source in runtime_libraries:
+            relative = source.relative_to(rocm_lib)
+            target_path = safe_destination(migraphx_root, relative.as_posix())
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target_path)
+        for required in ("libmigraphx_c.so.3", "libamdhip64.so.7"):
+            if not any(path.name == required for path in migraphx_root.rglob("*")):
+                raise RuntimeError(f"bundled ROCm runtime is missing {required}")
 
     if target.startswith("win32"):
         core = find_file(destination, lambda name: name.lower() == "onnxruntime.dll")
@@ -155,8 +161,8 @@ def main() -> None:
         "target": target.replace("macos", "darwin"),
         "ort_version": LOCK["ort"],
         "webgpu_ep_version": LOCK["webgpu_ep"],
-        "primary_ep_version": "CUDA 13 / cuDNN 9" if edition == "cuda" else "CoreML (macOS 14+)" if edition == "coreml" else "ORT 1.22.1 / ROCm 7.0",
-        "rocm_ort_version": LOCK["rocm_ort"] if edition == "rocm" else None,
+        "primary_ep_version": "CUDA 13 / cuDNN 9" if edition == "cuda" else "CoreML (macOS 14+)" if edition == "coreml" else f"MIGraphX / ROCm {LOCK['rocm_version']}",
+        "migraphx_ort_version": LOCK["migraphx_ort"] if edition == "migraphx" else None,
         "files": {path.relative_to(destination).as_posix(): digest(path) for path in files},
     }
     (destination / "runtime-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")

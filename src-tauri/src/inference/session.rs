@@ -2,7 +2,7 @@ use anyhow::Result;
 use ort::session::{builder::GraphOptimizationLevel, Session};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-#[cfg(feature = "rocm-worker")]
+#[cfg(feature = "migraphx-worker")]
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -23,14 +23,10 @@ pub struct ModelInfo {
 pub struct AppState {
     pub session: Arc<Mutex<Option<InferenceSession>>>,
     pub model_integrity: tokio::sync::OnceCell<()>,
-    #[cfg(feature = "rocm-worker")]
-    pub rocm_disabled: AtomicBool,
+    #[cfg(feature = "migraphx-worker")]
+    pub migraphx_disabled: AtomicBool,
     pub model_dir: PathBuf,
     pub runtime_dir: PathBuf,
-    #[cfg(feature = "cuda")]
-    pub cuda_runtime_dir: PathBuf,
-    #[cfg(feature = "cuda")]
-    pub cuda_runtime_lock: Mutex<()>,
 }
 
 pub struct InferenceSession {
@@ -46,8 +42,8 @@ pub struct InferenceSession {
 pub fn preferred_execution_provider() -> &'static str {
     if cfg!(feature = "coreml") {
         "CoreML (GPU + CPU fallback)"
-    } else if cfg!(feature = "rocm-worker") {
-        "ROCm (GPU + WebGPU + CPU fallback)"
+    } else if cfg!(feature = "migraphx-worker") {
+        "MIGraphX (GPU + WebGPU + CPU fallback)"
     } else if cfg!(feature = "tensorrt") {
         "TensorRT"
     } else if cfg!(feature = "cuda") {
@@ -66,18 +62,14 @@ pub fn preferred_execution_provider() -> &'static str {
 }
 
 impl AppState {
-    pub fn new(model_dir: PathBuf, runtime_dir: PathBuf, _cuda_runtime_dir: PathBuf) -> Self {
+    pub fn new(model_dir: PathBuf, runtime_dir: PathBuf) -> Self {
         Self {
             session: Arc::new(Mutex::new(None)),
             model_integrity: tokio::sync::OnceCell::new(),
-            #[cfg(feature = "rocm-worker")]
-            rocm_disabled: AtomicBool::new(false),
+            #[cfg(feature = "migraphx-worker")]
+            migraphx_disabled: AtomicBool::new(false),
             model_dir,
             runtime_dir,
-            #[cfg(feature = "cuda")]
-            cuda_runtime_dir: _cuda_runtime_dir,
-            #[cfg(feature = "cuda")]
-            cuda_runtime_lock: Mutex::new(()),
         }
     }
 

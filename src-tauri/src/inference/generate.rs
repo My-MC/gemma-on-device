@@ -2,10 +2,10 @@ use anyhow::Result;
 use ort::session::{Session, SessionInputValue};
 use ort::value::Tensor;
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "rocm-worker")]
+#[cfg(feature = "migraphx-worker")]
 use std::process::Stdio;
 use std::time::{Duration, Instant};
-#[cfg(feature = "rocm-worker")]
+#[cfg(feature = "migraphx-worker")]
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::Command,
@@ -62,39 +62,39 @@ pub async fn generate_text(state: &AppState, opts: GenerateOptions) -> Result<Ge
 
     // Once model files exist, inference errors must be visible to the caller;
     // silently returning mock output makes a broken real setup look healthy.
-    #[cfg(feature = "rocm-worker")]
+    #[cfg(feature = "migraphx-worker")]
     {
         if state
-            .rocm_disabled
+            .migraphx_disabled
             .load(std::sync::atomic::Ordering::Acquire)
         {
             try_real_inference(state, &prompt, max_tokens, None).await
         } else {
-            let (rocm_result, _) = try_rocm_worker(state, &prompt, max_tokens, None).await;
-            match rocm_result {
+            let (migraphx_result, _) = try_migraphx_worker(state, &prompt, max_tokens, None).await;
+            match migraphx_result {
                 Ok(result) => Ok(result),
-                Err(rocm_error) => {
+                Err(migraphx_error) => {
                     state
-                        .rocm_disabled
+                        .migraphx_disabled
                         .store(true, std::sync::atomic::Ordering::Release);
                     try_real_inference(state, &prompt, max_tokens, None)
                         .await
                         .map_err(|fallback| {
                             anyhow::anyhow!(
-                                "ROCm failed: {rocm_error}; WebGPU/CPU fallback failed: {fallback}"
+                                "MIGraphX failed: {migraphx_error}; WebGPU/CPU fallback failed: {fallback}"
                             )
                         })
                 }
             }
         }
     }
-    #[cfg(not(feature = "rocm-worker"))]
+    #[cfg(not(feature = "migraphx-worker"))]
     try_real_inference(state, &prompt, max_tokens, None).await
 }
 
-#[cfg(feature = "rocm-worker")]
+#[cfg(feature = "migraphx-worker")]
 #[derive(Serialize)]
-struct RocmWorkerRequest<'a> {
+struct MIGraphXWorkerRequest<'a> {
     protocol: u32,
     model_path: &'a str,
     tokenizer_path: &'a str,
@@ -103,15 +103,15 @@ struct RocmWorkerRequest<'a> {
     use_chat_template: bool,
 }
 
-#[cfg(feature = "rocm-worker")]
-async fn try_rocm_worker(
+#[cfg(feature = "migraphx-worker")]
+async fn try_migraphx_worker(
     state: &AppState,
     prompt: &str,
     max_tokens: usize,
     emit: Option<&(dyn Fn(String) -> Result<()> + Send + Sync)>,
 ) -> (Result<GenerateResult>, bool) {
-    let executable = state.runtime_dir.join("rocm-worker");
-    let runtime = state.runtime_dir.join("rocm");
+    let executable = state.runtime_dir.join("migraphx-worker");
+    let runtime = state.runtime_dir.join("migraphx");
     let model_path = state.default_model_path().to_string_lossy().into_owned();
     let tokenizer_path = state
         .default_tokenizer_path()
@@ -130,7 +130,7 @@ async fn try_rocm_worker(
             library_dirs.extend(children);
         }
     }
-    let request = RocmWorkerRequest {
+    let request = MIGraphXWorkerRequest {
         protocol: 1,
         model_path: &model_path,
         tokenizer_path: &tokenizer_path,
@@ -139,7 +139,7 @@ async fn try_rocm_worker(
         use_chat_template: false,
     };
     let child = Command::new(&executable)
-        .env("GEMMA_ROCM_RUNTIME", &runtime)
+        .env("GEMMA_MIGRAPHX_RUNTIME", &runtime)
         .env("LD_LIBRARY_PATH", {
             let old = std::env::var_os("LD_LIBRARY_PATH").unwrap_or_default();
             let mut paths = library_dirs.clone();
@@ -205,7 +205,7 @@ async fn try_rocm_worker(
         if message["protocol"] != 1 {
             let _ = child.kill().await;
             return (
-                Err(anyhow::anyhow!("unsupported ROCm worker protocol")),
+                Err(anyhow::anyhow!("unsupported MIGraphX worker protocol")),
                 emitted,
             );
         }
@@ -214,7 +214,7 @@ async fn try_rocm_worker(
                 let Some(token) = message["text"].as_str() else {
                     let _ = child.kill().await;
                     return (
-                        Err(anyhow::anyhow!("ROCm worker token message has no text")),
+                        Err(anyhow::anyhow!("MIGraphX worker token message has no text")),
                         emitted,
                     );
                 };
@@ -231,13 +231,18 @@ async fn try_rocm_worker(
                     Ok(result) => Some(result),
                     Err(error) => {
                         return (
-                            Err(anyhow::anyhow!("invalid ROCm worker result: {error}")),
+                            Err(anyhow::anyhow!("invalid MIGraphX worker result: {error}")),
                             emitted,
                         )
                     }
                 };
             }
-            _ => return (Err(anyhow::anyhow!("unknown ROCm worker event")), emitted),
+            _ => {
+                return (
+                    Err(anyhow::anyhow!("unknown MIGraphX worker event")),
+                    emitted,
+                )
+            }
         }
     }
     let status = match child.wait().await {
@@ -246,21 +251,23 @@ async fn try_rocm_worker(
     };
     if !status.success() {
         return (
-            Err(anyhow::anyhow!("ROCm worker exited with {status}")),
+            Err(anyhow::anyhow!("MIGraphX worker exited with {status}")),
             emitted,
         );
     }
     let Some(mut result) = response else {
         return (
             Err(anyhow::anyhow!(
-                "ROCm worker exited without a completion message"
+                "MIGraphX worker exited without a completion message"
             )),
             emitted,
         );
     };
-    if result.execution_provider != "ROCm" || result.is_mock {
+    if result.execution_provider != "MIGraphX" || result.is_mock {
         return (
-            Err(anyhow::anyhow!("worker did not report real ROCm inference")),
+            Err(anyhow::anyhow!(
+                "worker did not report real MIGraphX inference"
+            )),
             emitted,
         );
     }
@@ -534,30 +541,30 @@ pub async fn generate_stream(
     } else {
         opts.prompt.clone()
     };
-    #[cfg(feature = "rocm-worker")]
+    #[cfg(feature = "migraphx-worker")]
     {
         if state
-            .rocm_disabled
+            .migraphx_disabled
             .load(std::sync::atomic::Ordering::Acquire)
         {
             try_real_inference(state, &prompt, max_tokens, Some(&emit)).await
         } else {
-            let (rocm_result, emitted) =
-                try_rocm_worker(state, &prompt, max_tokens, Some(&emit)).await;
-            match rocm_result {
+            let (migraphx_result, emitted) =
+                try_migraphx_worker(state, &prompt, max_tokens, Some(&emit)).await;
+            match migraphx_result {
                 Ok(result) => Ok(result),
-                Err(rocm_error) => {
+                Err(migraphx_error) => {
                     state
-                        .rocm_disabled
+                        .migraphx_disabled
                         .store(true, std::sync::atomic::Ordering::Release);
                     if emitted {
-                        Err(rocm_error)
+                        Err(migraphx_error)
                     } else {
                         try_real_inference(state, &prompt, max_tokens, Some(&emit))
                             .await
                             .map_err(|fallback| {
                                 anyhow::anyhow!(
-                                    "ROCm failed: {rocm_error}; WebGPU/CPU fallback failed: {fallback}"
+                                    "MIGraphX failed: {migraphx_error}; WebGPU/CPU fallback failed: {fallback}"
                                 )
                             })
                     }
@@ -565,7 +572,7 @@ pub async fn generate_stream(
             }
         }
     }
-    #[cfg(not(feature = "rocm-worker"))]
+    #[cfg(not(feature = "migraphx-worker"))]
     try_real_inference(state, &prompt, max_tokens, Some(&emit)).await
 }
 

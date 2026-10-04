@@ -226,24 +226,22 @@ bun run check:ort             # rustc/cargo/ort/models/tauri-cli diagnostics
 
 ### Build
 
-Desktop editions use `bun run tauri:cuda`, `bun run tauri:migraphx`, and `bun run tauri:coreml`. Each selects its primary execution provider and falls back to WebGPU, then CPU. Runtime archives are downloaded from the GitHub Release named by the `GEMMA_RUNTIME_RELEASE_TAG` Actions variable, verified by SHA256, and unpacked using the `runtime-manifest.json` contract. CI builds each configured edition and uploads separate 7-day Actions artifacts. See the runtime bundle section below for exact asset names.
+Desktop editions use `bun run tauri:cuda`, `bun run tauri:migraphx`, and `bun run tauri:coreml`. Each selects its primary execution provider and falls back to WebGPU, then CPU. `scripts/prepare_runtime.py` downloads SHA256-pinned upstream packages and stages the runtime libraries under ignored `runtime-artifacts/`; CI uploads each built edition as a separate 7-day Actions artifact.
 
 ```bash
 bun run build                 # TypeScript check + Vite frontend build
 bun run tauri build           # Tauri bundle (target/release/bundle, workspace root)
-# With execution provider
-bun run tauri build -- --features cuda
+# Separate desktop editions; each stages its pinned runtime before building
+bun run tauri:cuda       # Windows/Linux x64: CUDA → WebGPU → CPU
+bun run tauri:migraphx   # Linux x64: MIGraphX → WebGPU → CPU
+bun run tauri:coreml     # macOS 14+ Apple Silicon: CoreML → WebGPU → CPU
 ```
 
-On Apple Silicon Macs, `bun run tauri dev` and `bun run tauri build` include
-CoreML automatically. Inference requests CoreML's `CPUAndGPU` compute mode,
-uses MLProgram with FP16 GPU accumulation, and falls back to CPU for graph nodes
-that CoreML cannot execute. The community Gemma ONNX graph contains dynamic
-operations, so current profiling shows partial GPU offload rather than
-GPU-exclusive execution. Compiled CoreML graphs
-are cached in `models/.coreml-cache/` (or the app data model directory).
-Set `GEMMA_COREML_PROFILE=1` when launching the app to log CoreML's per-operator
-hardware assignment and estimated execution time for GPU diagnostics.
+CUDA uses ONNX Runtime 1.30.0, CUDA 13, and cuDNN 9. The CUDA edition bundles ONNX Runtime, WebGPU, cuBLAS, and other pinned NVIDIA user-space libraries. Users need a compatible NVIDIA GPU driver; the CUDA Toolkit is not required. Windows may also require the current Microsoft Visual C++ Redistributable x64.
+
+The Linux AMD edition uses AMD's ONNX Runtime 1.23.2 MIGraphX provider and ROCm 7.2.1 user-space libraries, bundled with the application. It runs in a separate `gemma-migraphx-worker` process because its ORT version differs from the app's ORT 1.30.0 WebGPU/CPU runtime. Users need a compatible AMD GPU and kernel driver, but do not need to install ROCm or MIGraphX separately. Windows is not included because AMD does not provide the supported MIGraphX stack there.
+
+CoreML targets macOS 14 or newer on Apple Silicon. CoreML uses CPU and GPU where supported; unsupported graph nodes can fall back to CPU. Set `GEMMA_COREML_PROFILE=1` when launching the app to log per-operator hardware assignment. The WebGPU provider remains bundled in each GPU edition for fallback.
 
 Thresholds: desktop 5 tok/s / mobile 2 tok/s (INT4).
 
@@ -318,10 +316,9 @@ and 2–3 GB of working memory during inference.
 
 Execution providers in `src-tauri/Cargo.toml`:
 
-- Win: `directml` / `cuda` / `tensorrt`
-- Apple Silicon Mac: `coreml` is enabled automatically (GPU + CPU fallback)
-- Intel Mac: `coreml` (explicit Cargo feature)
-- Linux: `cuda`
+- Windows/Linux CUDA edition: `desktop-cuda`
+- Linux AMD edition: `desktop-migraphx` (isolated MIGraphX worker with bundled ROCm user-space runtime)
+- Apple Silicon macOS edition: `desktop-coreml`
 - Android: `nnapi` / `xnnpack`
 - iOS: `coreml` requires an explicit Cargo feature (enabled in CI, GPU + CPU fallback)
 
@@ -349,6 +346,7 @@ Defined in `src-tauri/src/lib.rs:1`:
 | `bun run export:onnx` | `scripts/export_onnx.py` (`optimum-cli export onnx --quant int4`) |
 | `bun run bench` | `scripts/bench.ts`, always a mock loop; use app `bench_inference` for real measurements |
 | `bun run check:ort` | `scripts/check_ort.ts` environment diagnostics |
+| `bun run tauri:cuda` / `tauri:migraphx` / `tauri:coreml` | Download locked runtime packages, stage the edition libraries, and build its bundle |
 
 ## Development Workflow
 

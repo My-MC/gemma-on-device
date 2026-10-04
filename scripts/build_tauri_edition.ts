@@ -3,26 +3,26 @@ import { chmod, cp, mkdir, readFile, rm } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join, relative, resolve, sep } from "node:path";
 
-type Edition = "cuda" | "rocm" | "coreml";
+type Edition = "cuda" | "migraphx" | "coreml";
 type RuntimeManifest = {
   edition: Edition;
   target: string;
   ort_version: string;
   webgpu_ep_version: string;
   primary_ep_version: string;
-  rocm_ort_version?: string;
+  migraphx_ort_version?: string;
   files: Record<string, string>;
 };
 
 const edition = process.argv[2] as Edition | undefined;
-if (!edition || !["cuda", "rocm", "coreml"].includes(edition)) {
-  throw new Error("Usage: bun scripts/build_tauri_edition.ts <cuda|rocm|coreml>");
+if (!edition || !["cuda", "migraphx", "coreml"].includes(edition)) {
+  throw new Error("Usage: bun scripts/build_tauri_edition.ts <cuda|migraphx|coreml>");
 }
 
 const target = `${process.platform}-${process.arch}`;
 const editionTargets: Record<Edition, string[]> = {
   cuda: ["win32-x64", "linux-x64"],
-  rocm: ["linux-x64"],
+  migraphx: ["linux-x64"],
   coreml: ["darwin-arm64"],
 };
 if (!editionTargets[edition].includes(target)) {
@@ -69,8 +69,8 @@ if (edition === "cuda") {
     ? "onnxruntime_providers_cuda.dll"
     : "libonnxruntime_providers_cuda.so");
 }
-if (edition === "rocm" && manifest.rocm_ort_version !== "1.22.1") {
-  throw new Error(`ROCm worker requires pinned ORT 1.22.1, got ${manifest.rocm_ort_version}`);
+if (edition === "migraphx" && manifest.migraphx_ort_version !== "1.23.2") {
+  throw new Error(`MIGraphX worker requires pinned ORT 1.23.2, got ${manifest.migraphx_ort_version}`);
 }
 for (const required of requiredRuntime) {
   if (!(required in manifest.files)) {
@@ -111,30 +111,30 @@ await Bun.write(join(staged, "runtime-manifest.json"), JSON.stringify(manifest, 
 const cargoFeature = `desktop-${edition}`;
 const config = "src-tauri/tauri.gpu.conf.json";
 const bundleArgs = process.platform === "linux" ? ["--bundles", "deb"] : [];
-if (edition === "rocm") {
-  const rocmOrt = join(staged, "rocm", "onnxruntime", "capi", "libonnxruntime.so.1.22.1");
+if (edition === "migraphx") {
+  const migraphxOrt = join(staged, "migraphx", "libonnxruntime.so.1.23.2");
   const workerFmt = Bun.spawn(
-    ["cargo", "fmt", "--manifest-path", "rocm-worker/Cargo.toml", "--", "--check"],
+    ["cargo", "fmt", "--manifest-path", "migraphx-worker/Cargo.toml", "--", "--check"],
     { cwd: repo, env: process.env, stdout: "inherit", stderr: "inherit" },
   );
   const workerFmtStatus = await workerFmt.exited;
-  if (workerFmtStatus !== 0) throw new Error(`ROCm worker formatting check failed with status ${workerFmtStatus}`);
+  if (workerFmtStatus !== 0) throw new Error(`MIGraphX worker formatting check failed with status ${workerFmtStatus}`);
   const workerClippy = Bun.spawn(
-    ["cargo", "clippy", "--manifest-path", "rocm-worker/Cargo.toml", "--", "-D", "warnings"],
-    { cwd: repo, env: { ...process.env, ORT_LIB_LOCATION: rocmOrt }, stdout: "inherit", stderr: "inherit" },
+    ["cargo", "clippy", "--manifest-path", "migraphx-worker/Cargo.toml", "--", "-D", "warnings"],
+    { cwd: repo, env: { ...process.env, ORT_LIB_LOCATION: migraphxOrt }, stdout: "inherit", stderr: "inherit" },
   );
   const workerClippyStatus = await workerClippy.exited;
-  if (workerClippyStatus !== 0) throw new Error(`ROCm worker clippy failed with status ${workerClippyStatus}`);
+  if (workerClippyStatus !== 0) throw new Error(`MIGraphX worker clippy failed with status ${workerClippyStatus}`);
   const worker = Bun.spawn(
-    ["cargo", "build", "--manifest-path", "rocm-worker/Cargo.toml", "--release"],
-    { cwd: repo, env: { ...process.env, ORT_LIB_LOCATION: rocmOrt }, stdout: "inherit", stderr: "inherit" },
+    ["cargo", "build", "--manifest-path", "migraphx-worker/Cargo.toml", "--release"],
+    { cwd: repo, env: { ...process.env, ORT_LIB_LOCATION: migraphxOrt }, stdout: "inherit", stderr: "inherit" },
   );
   const workerStatus = await worker.exited;
-  if (workerStatus !== 0) throw new Error(`ROCm worker build failed with status ${workerStatus}`);
-  const workerPath = join(staged, "rocm-worker");
-  await cp(join(repo, "rocm-worker", "target", "release", "gemma-rocm-worker"), workerPath);
+  if (workerStatus !== 0) throw new Error(`MIGraphX worker build failed with status ${workerStatus}`);
+  const workerPath = join(staged, "migraphx-worker");
+  await cp(join(repo, "migraphx-worker", "target", "release", "gemma-migraphx-worker"), workerPath);
   await chmod(workerPath, 0o755);
-  manifest.files["rocm-worker"] = createHash("sha256").update(Buffer.from(await Bun.file(workerPath).arrayBuffer())).digest("hex");
+  manifest.files["migraphx-worker"] = createHash("sha256").update(Buffer.from(await Bun.file(workerPath).arrayBuffer())).digest("hex");
   await Bun.write(join(staged, "runtime-manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
 }
 const proc = Bun.spawn(

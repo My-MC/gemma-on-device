@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use ort::{
-    execution_providers::ROCmExecutionProvider,
+    ep::MIGraphX,
     session::{builder::GraphOptimizationLevel, Session},
     value::Tensor,
 };
@@ -58,7 +58,7 @@ fn main() {
             serde_json::json!({"protocol": 1, "event": "complete", "result": response})
         ),
         Err(error) => {
-            eprintln!("ROCm worker failed: {error:#}");
+            eprintln!("MIGraphX worker failed: {error:#}");
             std::process::exit(1);
         }
     }
@@ -88,12 +88,14 @@ fn infer(request: Request) -> Result<Response> {
         "55da1312bdf1d7d8fe8d9d1b3eed04086261149e6034e0ac3f8c633b67f5aac8",
     )?;
     let runtime =
-        std::env::var_os("GEMMA_ROCM_RUNTIME").context("GEMMA_ROCM_RUNTIME is not set")?;
+        std::env::var_os("GEMMA_MIGRAPHX_RUNTIME").context("GEMMA_MIGRAPHX_RUNTIME is not set")?;
     let runtime = PathBuf::from(runtime);
-    let library = runtime.join("libonnxruntime.so.1.22.1");
-    ort::init_from(library.to_string_lossy())
-        .commit()
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let library = runtime.join("libonnxruntime.so.1.23.2");
+    let environment = ort::init_from(library).map_err(|e| anyhow::anyhow!("{e}"))?;
+    anyhow::ensure!(
+        environment.commit(),
+        "could not initialize MIGraphX ONNX Runtime"
+    );
 
     let tokenizer =
         Tokenizer::from_file(&request.tokenizer_path).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -114,11 +116,11 @@ fn infer(request: Request) -> Result<Response> {
         .collect::<Vec<_>>();
     let prompt_tokens = ids.len();
     let start = Instant::now();
-    let builder = Session::builder()
+    let mut builder = Session::builder()
         .map_err(|e| anyhow::anyhow!("{e}"))?
         .with_optimization_level(GraphOptimizationLevel::Level3)
         .map_err(|e| anyhow::anyhow!("{e}"))?
-        .with_execution_providers([ROCmExecutionProvider::default().build().error_on_failure()])
+        .with_execution_providers([MIGraphX::default().build().error_on_failure()])
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     let mut session = builder
         .commit_from_file(&request.model_path)
@@ -186,7 +188,7 @@ fn infer(request: Request) -> Result<Response> {
         tokens_per_sec: generated.len() as f64 / (latency_ms as f64 / 1000.0).max(0.001),
         is_mock: false,
         model_id: "gemma-3-1b-it-INT4".into(),
-        execution_provider: "ROCm".into(),
+        execution_provider: "MIGraphX".into(),
     })
 }
 

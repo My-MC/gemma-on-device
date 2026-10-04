@@ -1,6 +1,6 @@
 /target
 /src-tauri/target
-/rocm-worker/target
+/migraphx-worker/target
 /.cache
 __pycache__/
 /runtime-artifacts
