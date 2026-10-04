@@ -279,6 +279,13 @@ fn init_ort(app: &tauri::AppHandle) {
     }
 
     if let Some(path) = candidates.into_iter().find(|path| path.exists()) {
+        #[cfg(feature = "migraphx")]
+        if let Some(runtime) = path.parent() {
+            let database = runtime.join("migraphx/share/miopen/db");
+            if database.is_dir() && std::env::var_os("MIOPEN_SYSTEM_DB_PATH").is_none() {
+                std::env::set_var("MIOPEN_SYSTEM_DB_PATH", database);
+            }
+        }
         match ort::init_from(path.clone()) {
             Ok(builder) => {
                 if builder.commit() {
