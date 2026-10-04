@@ -27,13 +27,23 @@ if (!/^\d+$/.test(port)) {
 const devUrl = `http://localhost:${port}`;
 const patch = { build: { devUrl } };
 
-const outPath = resolve(import.meta.dir, "../src-tauri/tauri.worktree.conf.json");
-writeFileSync(outPath, JSON.stringify(patch, null, 2) + "\n");
+const outPath = resolve(
+  import.meta.dir,
+  "../src-tauri/tauri.worktree.conf.json",
+);
+writeFileSync(outPath, `${JSON.stringify(patch, null, 2)}\n`);
 
 console.log(`wrote ${outPath} → devUrl: ${devUrl}`);
 
 const proc = Bun.spawn(
-  ["bun", "run", "tauri", "dev", "--config", "src-tauri/tauri.worktree.conf.json"],
+  [
+    "bun",
+    "run",
+    "tauri",
+    "dev",
+    "--config",
+    "src-tauri/tauri.worktree.conf.json",
+  ],
   { stdio: ["inherit", "inherit", "inherit"] },
 );
 

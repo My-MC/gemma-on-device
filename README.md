@@ -148,6 +148,21 @@ bun run build && bun run preview
 
 Closing the window prints `error: script "dev" exited with code 143` — this is Vite's child process exiting on `SIGTERM` and is expected.
 
+### Linting and formatting
+
+Biome checks React/TypeScript and CSS in `src/`, TypeScript in `scripts/`, and root JSON/TypeScript configuration files. It respects `.gitignore`; Rust continues to use Clippy and rustfmt.
+
+```bash
+bun run lint          # Lint; warnings also fail
+bun run format        # Write formatting changes
+bun run format:check  # Check formatting without writing
+bun run check         # Check lint, formatting, and imports
+bun run check:fix     # Apply formatting, import organization, and safe lint fixes
+bun run check:ci      # Read-only CI check; warnings also fail
+```
+
+Run `bun run check` and `bun run build` before committing frontend changes. CI runs `bun run check:ci` before the frontend build. Biome is pinned in `package.json` and `bun.lock`; its configuration lives in `biome.json`.
+
 ### Model Acquisition
 
 Downloads are **SHA256-verified** (see `models/README.md` and `CONTRIBUTING.md`). After streaming to a temporary `.part` file the hash is checked before atomic rename; on mismatch the file is deleted and the command fails.

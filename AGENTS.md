@@ -27,6 +27,12 @@ This file defines operational rules for agents/contributors in `gemma-on-device`
 
 ```bash
 bun install
+bun run check              # Biome lint, formatting, and imports (warnings fail)
+bun run check:fix          # Biome formatting, imports, and safe lint fixes
+bun run format             # Biome formatter (write)
+bun run format:check       # Biome formatter (read-only)
+bun run lint               # Biome linter (warnings fail)
+bun run check:ci           # Biome CI check (read-only; warnings fail)
 bun run dev                # Vite only http://localhost:1420
 bun run tauri dev          # Desktop (requires libwebkit2gtk-4.1-dev etc.)
 bun run tauri android dev  # requires NDK
@@ -106,6 +112,9 @@ Follow global `~/.config/opencode/AGENTS.md`:
 - **CI minimum**: `bun run build` and `cargo check --manifest-path src-tauri/Cargo.toml` must pass. `bun run tauri dev` succeeds when `WindowId` is registered in `weston.log`. `libEGL/MESA ZINK` warnings and `exit 143` (vite SIGTERM) are expected and benign.
 
 ### Per-Task Quality Gates (Mandatory)
+
+- Frontend, TypeScript scripts, and root JSON/TypeScript configuration changes must pass `bun run check` and `bun run build`. CI runs `bun run check:ci` before the frontend build.
+- `biome.json` enables recommended lint rules, formatting, and import organization for `src/`, TypeScript scripts, and root JSON/TypeScript configuration. Biome respects `.gitignore`; Rust uses Clippy and rustfmt.
 
 After **every task** (feature, fix, refactor, docs change that touches `src-tauri/`), run the following **in order** and ensure they pass before marking the task complete. Do not batch them at the end of a multi-task session.
 

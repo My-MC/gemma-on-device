@@ -12,6 +12,7 @@ This guide defines the contributor workflow for `gemma-on-device` (`com.gemmaond
 
 ```bash
 bun install
+bun run check              # Biome lint, formatting, and imports — must pass
 bun run build              # tsc && vite build — must pass
 cargo check --manifest-path src-tauri/Cargo.toml
 bun run dev                # Vite only http://localhost:1420
@@ -99,6 +100,8 @@ This removes only the working directory; the branch itself remains until you del
 
 ## Per-Task Quality Gates (Mandatory)
 
+For frontend, TypeScript scripts, or root JSON/TypeScript configuration changes, run `bun run check` and `bun run build`. Biome's recommended lint rules, formatter, and import organization are configured in `biome.json`; warnings fail the check. Use `bun run check:fix` for safe fixes or `bun run format` for formatting only. CI enforces the same checks with `bun run check:ci` before building. Rust continues to use Clippy and rustfmt.
+
 Run these **in order after every task** (feature, fix, refactor, docs that touches `src-tauri/`) and ensure they pass before committing or opening a PR. Do not batch at the end of a multi-task session.
 
 ```bash
@@ -116,7 +119,7 @@ Rules:
 - If `src-tauri/` was not touched, `cargo` steps may be skipped but `bun run build` is still required for `src/` changes.
 - If a commit fails or hooks reject it, fix and create a **new** commit; do not amend the failed commit.
 
-CI will enforce the same gates (`.github/workflows` upcoming). A PR with failing checks will not be merged.
+CI enforces these gates in `.github/workflows/ci.yml`. A PR with failing checks will not be merged.
 
 ## Model Management & SHA256 Verification
 
