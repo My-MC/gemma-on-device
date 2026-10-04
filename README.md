@@ -370,19 +370,37 @@ Mobile generated directories under `src-tauri/gen/` are also per-worktree. After
 
 ### Per-Task Quality Gates (Mandatory)
 
-After every task (feature, fix, refactor, docs touching `src-tauri/`), run in order:
+After every frontend or backend task (feature, fix, or refactor), run the applicable gates before committing, opening a PR, or marking the task complete. Do not defer them to the end of a multi-task session.
+
+| Changed area | Required gates |
+| --- | --- |
+| Frontend, TypeScript scripts, or root JSON/TypeScript config (including JS dependencies/lockfile) | `bun run check` (Biome) → `bun run build` (TypeScript check + production frontend build) |
+| Rust backend: `src-tauri/`, Rust dependencies/lockfile or workspace config | Cargo check → clippy → fmt check → `bun run build` |
+| Both frontend and backend | Cargo gates → `bun run check` → `bun run build` |
+| Documentation only | Referenced path/command checks and `git diff --check` |
+
+For frontend-only tasks, run:
+
+```bash
+bun run check
+bun run build
+```
+
+For backend or combined tasks, run in order:
 
 ```bash
 cargo check --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check  # if diff: cargo fmt --manifest-path src-tauri/Cargo.toml
+bun run check  # required when frontend, TypeScript scripts, or root JSON/TypeScript config changed
 bun run build  # also runs tsc
 ```
 
 - `cargo check` must be clean
 - `cargo clippy -- -D warnings` must be clean
 - `cargo fmt -- --check` must exit 0
-- If `src-tauri/` was not touched, Cargo steps may be skipped; frontend changes require `bun run build`. Docs-only changes require path/command and diff checks. Dependency, script, and build configuration changes need the relevant build checks.
+- `bun run check` and `bun run build` must exit 0 after every frontend task, including styling/assets and frontend dependency/config changes. Biome checks lint/format/imports; the build runs `tsc` and `vite build`. A working dev server alone does not satisfy these gates.
+- Frontend-only tasks may skip Cargo gates. Docs-only tasks may skip compile gates. Script changes need the relevant checks for the affected frontend/backend build path.
 - CI already runs frontend build, desktop Cargo gates/bundles on Linux/Windows/macOS, and Android/iOS package builds. Device/GPU inference validation remains manual.
 
 ## Troubleshooting

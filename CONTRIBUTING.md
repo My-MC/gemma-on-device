@@ -112,12 +112,29 @@ Biome explicitly enables the React domain's recommended rules (`linter.domains.r
 
 For frontend, TypeScript scripts, or root JSON/TypeScript configuration changes, run `bun run check` and `bun run build`. Biome's recommended lint rules, formatter, and import organization are configured in `biome.json`; warnings fail the check. Use `bun run check:fix` for safe fixes or `bun run format` for formatting only. CI enforces the same checks with `bun run check:ci` before building. Rust continues to use Clippy and rustfmt.
 
-Run these **in order after every task** (feature, fix, refactor, docs that touches `src-tauri/`) and ensure they pass before committing or opening a PR. Do not batch at the end of a multi-task session.
+Run the applicable gates **after every frontend or backend task** (feature, fix, or refactor) and ensure they pass before committing, opening a PR, or marking the task complete. Do not batch at the end of a multi-task session.
+
+| Changed area | Required gates |
+| --- | --- |
+| Frontend, TypeScript scripts, or root JSON/TypeScript config (including JS dependencies/lockfile) | `bun run check` (Biome) → `bun run build` (TypeScript check + production frontend build) |
+| Rust backend: `src-tauri/`, Rust dependencies/lockfile or workspace config | Cargo check → clippy → fmt check → `bun run build` |
+| Both frontend and backend | Cargo gates → `bun run check` → `bun run build` |
+| Documentation only | Referenced path/command checks and `git diff --check` |
+
+For frontend-only tasks, run:
+
+```bash
+bun run check
+bun run build
+```
+
+For backend or combined tasks, run these **in order**:
 
 ```bash
 cargo check --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check   # if diff: cargo fmt --manifest-path src-tauri/Cargo.toml
+bun run check  # required when frontend, TypeScript scripts, or root JSON/TypeScript config changed
 bun run build   # also runs tsc
 ```
 
@@ -126,8 +143,8 @@ Rules:
 - `cargo check` must be clean.
 - `cargo clippy -- -D warnings` must be clean. Fix with `cargo clippy --fix --allow-dirty` or manually. `#[allow(dead_code)]` only when justified.
 - `cargo fmt -- --check` must exit 0. Always run `cargo fmt` before commit; do not hand-format.
-- If `src-tauri/` was not touched, `cargo` steps may be skipped but `bun run build` is still required for `src/` changes.
-- Docs-only changes need referenced path/command and diff checks; compile gates are not required. Dependency, script, or build configuration changes need the relevant build checks.
+- `bun run check` and `bun run build` must exit 0 after every frontend task, including styling/assets and frontend dependency/config changes. Biome checks lint/format/imports; the build runs `tsc` and `vite build`. A working dev server alone does not satisfy these gates.
+- Frontend-only tasks may skip Cargo gates. Docs-only tasks may skip compile gates. Script changes need the relevant checks for the affected frontend/backend build path.
 - Provider code changes also need `cargo check` and `cargo clippy -- -D warnings` with the affected Cargo feature on a supported host.
 - If a commit fails or hooks reject it, fix and create a **new** commit; do not amend the failed commit.
 
