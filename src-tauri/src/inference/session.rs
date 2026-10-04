@@ -513,8 +513,18 @@ mod tests {
             .unwrap()
             .commit());
         let env = Environment::current().unwrap();
-        env.register_ep_library("MIGraphXExecutionProvider", migraphx_library_path(&runtime))
-            .unwrap();
+        if let Err(error) =
+            env.register_ep_library("MIGraphXExecutionProvider", migraphx_library_path(&runtime))
+        {
+            let message = error.to_string();
+            assert!(
+                message.contains("hipGetDeviceCount")
+                    && ["HIP failure 100:", "HIP failure 35:"]
+                        .iter()
+                        .any(|expected| message.contains(expected)),
+                "unexpected plugin registration failure: {message}"
+            );
+        }
         // Enumerating devices must work even on CI runners without an AMD GPU.
         let _devices = env.devices().collect::<Vec<_>>();
         // A minimal float Identity graph exercises the same ORT core's CPU path.

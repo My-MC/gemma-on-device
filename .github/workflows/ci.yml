@@ -71,6 +71,16 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
+      - name: Free space for bundled GPU runtimes
+        if: runner.os == 'Linux'
+        run: |
+          sudo python3 - <<'PY'
+          import pathlib, shutil
+          for folder in ('/usr/share/dotnet', '/usr/local/lib/android'):
+              path = pathlib.Path(folder)
+              if path.is_dir():
+                  shutil.rmtree(path)
+          PY
       - name: Install Tauri system dependencies
         if: runner.os == 'Linux'
         run: |
