@@ -79,9 +79,9 @@ jobs:
       - name: Install MIGraphX runtime dependencies
         if: matrix.edition == 'migraphx'
         run: |
-          wget https://repo.radeon.com/amdgpu-install/7.2.2/ubuntu/noble/amdgpu-install_7.2.2.70202-1_all.deb
-          sudo apt-get install -y ./amdgpu-install_7.2.2.70202-1_all.deb
-          sudo sed -i 's|graphics/7.2.2|graphics/7.2.1|' /etc/apt/sources.list.d/rocm.list
+          wget -q https://repo.radeon.com/rocm/rocm.gpg.key -O /tmp/rocm.gpg.key
+          gpg --dearmor < /tmp/rocm.gpg.key | sudo tee /usr/share/keyrings/rocm.gpg > /dev/null
+          echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/7.2.1 noble main' | sudo tee /etc/apt/sources.list.d/rocm.list
           sudo apt-get update
           sudo apt-get install -y migraphx migraphx-dev hip-dev ninja-build patch
       - uses: dtolnay/rust-toolchain@stable

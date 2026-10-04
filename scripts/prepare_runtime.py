@@ -118,6 +118,9 @@ def main() -> None:
     elif target.startswith("linux"):
         core = find_file(destination, lambda name: name == "libonnxruntime.so.1.30.0")
         shutil.copy2(core, destination / "libonnxruntime.so")
+        if edition == "migraphx":
+            # The official SDK links plugins to this SONAME; keep the same core.
+            shutil.copy2(core, destination / "libonnxruntime.so.1")
     else:
         core = find_file(destination, lambda name: name == "libonnxruntime.1.30.0.dylib")
         shutil.copy2(core, destination / "libonnxruntime.dylib")
