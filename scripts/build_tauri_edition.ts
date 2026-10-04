@@ -1,6 +1,14 @@
 #!/usr/bin/env bun
 import { createHash } from "node:crypto";
-import { cp, mkdir, readFile, rm } from "node:fs/promises";
+import {
+  cp,
+  lstat,
+  mkdir,
+  readFile,
+  readlink,
+  rm,
+  symlink,
+} from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 
 type Edition = "cuda" | "migraphx" | "coreml";
@@ -130,14 +138,22 @@ for (const [file, expectedHash] of Object.entries(manifest.files)) {
   }
 }
 
-const staged = join(repo, "target", "release", "ort-runtime");
+const staged = join(repo, "runtime-artifacts", "staged", "ort-runtime");
 await rm(staged, { recursive: true, force: true });
+await rm(join(repo, "target", "release", "ort-runtime"), {
+  recursive: true,
+  force: true,
+});
 await mkdir(staged, { recursive: true });
 for (const file of Object.keys(manifest.files)) {
   const source = resolve(artifacts, file);
   const destination = resolve(staged, file);
   await mkdir(resolve(destination, ".."), { recursive: true });
-  await cp(source, destination, { verbatimSymlinks: true });
+  if ((await lstat(source)).isSymbolicLink()) {
+    await symlink(await readlink(source), destination);
+  } else {
+    await cp(source, destination);
+  }
 }
 if (process.platform === "win32") {
   await cp(
@@ -192,3 +208,14 @@ const proc = Bun.spawn(
   { cwd: repo, env: process.env, stdout: "inherit", stderr: "inherit" },
 );
 process.exitCode = await proc.exited;
+if (process.exitCode === 0) {
+  for (const [file, expectedHash] of Object.entries(manifest.files)) {
+    const copied = join(repo, "target", "release", "ort-runtime", file);
+    const hash = createHash("sha256")
+      .update(Buffer.from(await Bun.file(copied).arrayBuffer()))
+      .digest("hex");
+    if (hash !== expectedHash) {
+      throw new Error(`Tauri runtime copy is corrupted: ${file}`);
+    }
+  }
+}

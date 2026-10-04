@@ -5,7 +5,7 @@
   },
   "bundle": {
     "resources": {
-      "../target/release/ort-runtime/": "ort-runtime/"
+      "../runtime-artifacts/staged/ort-runtime/": "ort-runtime/"
     }
   }
 }
