@@ -82,6 +82,7 @@ jobs:
           wget -q https://repo.radeon.com/rocm/rocm.gpg.key -O /tmp/rocm.gpg.key
           gpg --dearmor < /tmp/rocm.gpg.key | sudo tee /usr/share/keyrings/rocm.gpg > /dev/null
           echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/7.2.1 noble main' | sudo tee /etc/apt/sources.list.d/rocm.list
+          printf 'Package: *\nPin: origin repo.radeon.com\nPin-Priority: 600\n' | sudo tee /etc/apt/preferences.d/rocm
           sudo apt-get update
           sudo apt-get install -y migraphx migraphx-dev hip-dev hipcc ninja-build patch
       - uses: dtolnay/rust-toolchain@stable
