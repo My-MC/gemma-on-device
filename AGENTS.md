@@ -21,6 +21,7 @@ This file defines operational rules for agents/contributors in `gemma-on-device`
 - `src-tauri/` — Rust, `src/lib.rs` hosts Tauri commands + `setup` (app_data_dir), `src/inference/{session,tokenizer,generate,bench,download}.rs`
 - `models/` — `.gitignore`, see `models/README.md`. Expected files: `gemma-3-1b-it-int4.onnx` + `tokenizer.json`. Falls back to `generate.rs:mock_generate` when not present
 - `scripts/` — `download_model.ts` (Bun), `bench.ts`, `check_ort.ts`, `export_onnx.py` (optimum)
+- `scripts/generate_licenses.ts` generates the target-specific dependency report in ignored `src/generated/licenses.json`, shown by the footer license viewer
 - `Cargo.toml` (workspace root) is `members = ["src-tauri"]`, `resolver = "2"` only
 
 ## Development Commands
@@ -37,6 +38,7 @@ bun run tauri build        # bundle
 bun run download:model     # 1b-int4 (onnx-community)
 bun run bench              # CLI bench
 bun run check:ort          # environment diagnostics
+bun run licenses:generate # refresh host/selected target dependency licenses
 cargo check --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
@@ -80,6 +82,8 @@ Agents may work in a Git worktree. Each worktree is an isolated working director
 - `src-tauri/src/inference/download.rs` streams via `reqwest` (`rustls-tls`) and emits `app.emit("download-progress")` / `emit("download-complete")`, listened to in `src/App.tsx`. Downloads are verified via SHA256 (`models/README.md`, see `CONTRIBUTING.md`).
 - **SHA256**: Every model file (`*.onnx`, `*.onnx_data`, `tokenizer.json`) must be SHA256-verified after download. Expected hashes live in `models/README.md`. Verification is mandatory before `Session::commit_from_file`.
 - **ORT DLL**: Windows-only concern — `src-tauri/tauri.windows.conf.json` owns the `bundle.resources` entry; `scripts/download_ort_dll.ts` stages a SHA256-verified copy (auto-run by `beforeBuildCommand`). Linux/macOS builds require no DLL.
+- **Licenses**: The frontend viewer reads generated offline license data. The generator uses the active Tauri target and Cargo features, excludes JavaScript dev dependencies and Rust build/dev dependencies, includes staged Windows ONNX Runtime license files, and stops if a package has no license identifier or text.
+- Set `GEMMA_CARGO_FEATURES` to any extra Cargo features passed to a plain Tauri build so its dependency license report matches that build.
 
 ## Context7 / Context-Mode (Mandatory)
 

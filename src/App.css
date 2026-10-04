@@ -432,5 +432,6 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .progress-fill { height: 100%; background: linear-gradient(90deg, var(--fill-from), var(--fill-to)); transition: width 0.2s; }
 
 .footer { text-align: center; font-size: 0.75rem; margin-top: 8px; }
+.license-link { padding: 0; color: inherit; background: none; border: 0; font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .muted { color: var(--text-muted); }
 code { background: var(--sunken); padding: 2px 6px; border-radius: 4px; font-size: 0.8em; }

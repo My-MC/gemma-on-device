@@ -1,7 +1,9 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
+
+const LicenseDialog = lazy(() => import("./LicenseDialog").then((module) => ({ default: module.LicenseDialog })));
 
 type ModelInfo = {
   model_id: string;
@@ -214,6 +216,8 @@ function formatBytes(b?: number) {
 }
 
 export default function App() {
+  const [showLicenses, setShowLicenses] = useState(false);
+  const closeLicenses = useCallback(() => setShowLicenses(false), []);
   const [prompt, setPrompt] = useState("こんにちは！Gemmaのオンデバイス推論について教えて。");
   const [maxTokens, setMaxTokens] = useState(128);
   const [temperature, setTemperature] = useState(0.7);
@@ -636,7 +640,14 @@ export default function App() {
 
       <footer className="footer muted">
         gemma-on-device · Rust ort 2.0 · Tauri 2 · React 19 · Bun 1.3
+        <span aria-hidden="true"> · </span>
+        <button className="license-link" onClick={() => setShowLicenses(true)}>ライセンス</button>
       </footer>
+      {showLicenses && (
+        <Suspense fallback={<p role="status">ライセンス情報を読み込んでいます…</p>}>
+          <LicenseDialog onClose={closeLicenses} />
+        </Suspense>
+      )}
     </main>
   );
 }
