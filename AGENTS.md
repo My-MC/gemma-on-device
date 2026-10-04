@@ -113,6 +113,8 @@ Follow global `~/.config/opencode/AGENTS.md`:
 
 ### Per-Task Quality Gates (Mandatory)
 
+- Keep the React domain explicitly enabled with `linter.domains.react: "recommended"` in `biome.json`, alongside the general recommended lint preset.
+
 - Frontend, TypeScript scripts, and root JSON/TypeScript configuration changes must pass `bun run check` and `bun run build`. CI runs `bun run check:ci` before the frontend build.
 - `biome.json` enables recommended lint rules, formatting, and import organization for `src/`, TypeScript scripts, and root JSON/TypeScript configuration. Biome respects `.gitignore`; Rust uses Clippy and rustfmt.
 

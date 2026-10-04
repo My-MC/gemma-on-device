@@ -152,6 +152,8 @@ Closing the window prints `error: script "dev" exited with code 143` — this is
 
 Biome checks React/TypeScript and CSS in `src/`, TypeScript in `scripts/`, and root JSON/TypeScript configuration files. It respects `.gitignore`; Rust continues to use Clippy and rustfmt.
 
+`biome.json` explicitly enables the React domain with `linter.domains.react: "recommended"`, alongside the general recommended lint preset.
+
 ```bash
 bun run lint          # Lint; warnings also fail
 bun run format        # Write formatting changes

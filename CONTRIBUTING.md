@@ -100,6 +100,8 @@ This removes only the working directory; the branch itself remains until you del
 
 ## Per-Task Quality Gates (Mandatory)
 
+Biome explicitly enables the React domain's recommended rules (`linter.domains.react: "recommended"`) alongside the general recommended lint preset.
+
 For frontend, TypeScript scripts, or root JSON/TypeScript configuration changes, run `bun run check` and `bun run build`. Biome's recommended lint rules, formatter, and import organization are configured in `biome.json`; warnings fail the check. Use `bun run check:fix` for safe fixes or `bun run format` for formatting only. CI enforces the same checks with `bun run check:ci` before building. Rust continues to use Clippy and rustfmt.
 
 Run these **in order after every task** (feature, fix, refactor, docs that touches `src-tauri/`) and ensure they pass before committing or opening a PR. Do not batch at the end of a multi-task session.
