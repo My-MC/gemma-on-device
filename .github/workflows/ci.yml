@@ -112,6 +112,18 @@ jobs:
         run: cargo test --manifest-path src-tauri/Cargo.toml --features desktop-migraphx migraphx_plugin_runtime_smoke -- --ignored
         env:
           GEMMA_PLUGIN_TEST_RUNTIME: ${{ github.workspace }}/target/release/ort-runtime
+      - name: Verify AMD installer system dependencies
+        if: matrix.edition == 'migraphx'
+        run: |
+          python - <<'PY'
+          import pathlib, subprocess
+          bundles = list(pathlib.Path('target/release/bundle/deb').glob('*.deb'))
+          assert bundles, 'MIGraphX deb is missing'
+          for bundle in bundles:
+              dependencies = subprocess.check_output(['dpkg-deb', '--field', str(bundle), 'Depends'], text=True)
+              for required in ('libnuma1', 'libdrm-amdgpu1', 'libelf1', 'libwebkit2gtk-4.1-0'):
+                  assert required in dependencies, f'{bundle} is missing {required}'
+          PY
       - name: Verify CPU fallback without GPU plugins
         if: matrix.edition == 'migraphx'
         run: cargo test --manifest-path src-tauri/Cargo.toml --features desktop-migraphx migraphx_unavailable_falls_back_to_cpu -- --ignored

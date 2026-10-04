@@ -157,6 +157,25 @@ await Bun.write(
 const cargoFeature = `desktop-${edition}`;
 const config = "src-tauri/tauri.gpu.conf.json";
 const bundleArgs = process.platform === "linux" ? ["--bundles", "deb"] : [];
+if (edition === "migraphx") {
+  bundleArgs.push(
+    "--config",
+    JSON.stringify({
+      bundle: {
+        linux: {
+          deb: {
+            depends: [
+              "libnuma1",
+              "libdrm2",
+              "libdrm-amdgpu1",
+              "libelf1 | libelf1t64",
+            ],
+          },
+        },
+      },
+    }),
+  );
+}
 const proc = Bun.spawn(
   [
     "bun",
