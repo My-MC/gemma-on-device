@@ -320,10 +320,10 @@ fn preload_runtime_dependencies(runtime_dir: &std::path::Path) {
                 if path.file_name().is_some_and(|name| name != "migraphx") {
                     directories.push(path);
                 }
-            } else if path
-                .file_name()
-                .is_some_and(|name| name.to_string_lossy().contains(".so"))
-            {
+            } else if path.file_name().is_some_and(|name| {
+                let name = name.to_string_lossy();
+                name.contains(".so") && !name.starts_with("libonnxruntime.so")
+            }) {
                 pending.push(path);
             }
         }

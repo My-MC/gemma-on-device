@@ -111,6 +111,11 @@ jobs:
         run: cargo test --manifest-path src-tauri/Cargo.toml --features desktop-migraphx migraphx_plugin_runtime_smoke -- --ignored
         env:
           GEMMA_PLUGIN_TEST_RUNTIME: ${{ github.workspace }}/target/release/ort-runtime
+      - name: Verify CPU fallback without GPU plugins
+        if: matrix.edition == 'migraphx'
+        run: cargo test --manifest-path src-tauri/Cargo.toml --features desktop-migraphx migraphx_unavailable_falls_back_to_cpu -- --ignored
+        env:
+          ORT_DYLIB_PATH: ${{ github.workspace }}/target/release/ort-runtime/libonnxruntime.so
       - name: Upload edition bundle
         uses: actions/upload-artifact@v7
         with:

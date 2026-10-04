@@ -28,6 +28,9 @@ def build_plugin(lock: dict, cache: Path, destination: Path, fetch) -> Path:
     with tarfile.open(fetch(pinned["sdk"])) as archive:
         archive.extractall(sdk_dir, filter="data")
     sdk = sdk_dir / f"onnxruntime-linux-x64-{lock['ort']}"
+    # ORT 1.30's Linux SDK ships libraries in lib, but its CMake export uses lib64.
+    if not (sdk / "lib64").exists():
+        (sdk / "lib64").symlink_to("lib", target_is_directory=True)
     build = work / "build"
     subprocess.run([
         "cmake", "-S", str(source), "-B", str(build), "-G", "Ninja",

@@ -469,6 +469,31 @@ mod tests {
     use super::*;
 
     #[cfg(feature = "migraphx")]
+    const IDENTITY_MODEL: &[u8] = &[
+        8, 8, 58, 59, 10, 16, 10, 1, 120, 18, 1, 121, 34, 8, 73, 100, 101, 110, 116, 105, 116, 121,
+        18, 5, 115, 109, 111, 107, 101, 90, 15, 10, 1, 120, 18, 10, 10, 8, 8, 1, 18, 4, 10, 2, 8,
+        1, 98, 15, 10, 1, 121, 18, 10, 10, 8, 8, 1, 18, 4, 10, 2, 8, 1, 66, 2, 16, 13,
+    ];
+
+    #[cfg(feature = "migraphx")]
+    #[test]
+    #[ignore = "requires ORT_DYLIB_PATH; run in a separate test process"]
+    fn migraphx_unavailable_falls_back_to_cpu() {
+        use ort::value::Tensor;
+        let root = std::env::temp_dir().join(format!("gemma-ep-fallback-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let model = root.join("identity.onnx");
+        std::fs::write(&model, IDENTITY_MODEL).unwrap();
+        let (mut session, provider) =
+            create_session(&model, &root.join("missing-runtime"), &[]).unwrap();
+        assert_eq!(provider, "CPU");
+        let input = Tensor::from_array(([1], vec![42_f32])).unwrap();
+        let output = session.run(ort::inputs![input]).unwrap();
+        assert_eq!(output[0].try_extract_tensor::<f32>().unwrap().1, &[42_f32]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "migraphx")]
     #[test]
     #[ignore = "requires the staged native MIGraphX bundle"]
     fn migraphx_plugin_runtime_smoke() {
@@ -483,15 +508,9 @@ mod tests {
         // Enumerating devices must work even on CI runners without an AMD GPU.
         let _devices = env.devices().collect::<Vec<_>>();
         // A minimal float Identity graph exercises the same ORT core's CPU path.
-        let model = [
-            8, 8, 58, 59, 10, 16, 10, 1, 120, 18, 1, 121, 34, 8, 73, 100, 101, 110, 116, 105, 116,
-            121, 18, 5, 115, 109, 111, 107, 101, 90, 15, 10, 1, 120, 18, 10, 10, 8, 8, 1, 18, 4,
-            10, 2, 8, 1, 98, 15, 10, 1, 121, 18, 10, 10, 8, 8, 1, 18, 4, 10, 2, 8, 1, 66, 2, 16,
-            13,
-        ];
         let mut session = Session::builder()
             .unwrap()
-            .commit_from_memory(&model)
+            .commit_from_memory(IDENTITY_MODEL)
             .unwrap();
         let input = Tensor::from_array(([1], vec![42_f32])).unwrap();
         let output = session.run(ort::inputs![input]).unwrap();
