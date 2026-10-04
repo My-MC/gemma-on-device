@@ -137,7 +137,7 @@ for (const file of Object.keys(manifest.files)) {
   const source = resolve(artifacts, file);
   const destination = resolve(staged, file);
   await mkdir(resolve(destination, ".."), { recursive: true });
-  await cp(source, destination);
+  await cp(source, destination, { verbatimSymlinks: true });
 }
 if (process.platform === "win32") {
   await cp(

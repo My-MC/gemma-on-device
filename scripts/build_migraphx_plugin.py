@@ -28,9 +28,12 @@ def build_plugin(lock: dict, cache: Path, destination: Path, fetch) -> Path:
     with tarfile.open(fetch(pinned["sdk"])) as archive:
         archive.extractall(sdk_dir, filter="data")
     sdk = sdk_dir / f"onnxruntime-linux-x64-{lock['ort']}"
-    # ORT 1.30's Linux SDK ships libraries in lib, but its CMake export uses lib64.
+    # ORT 1.30's SDK export uses lib64 and include/onnxruntime, unlike its archive.
     if not (sdk / "lib64").exists():
         (sdk / "lib64").symlink_to("lib", target_is_directory=True)
+    include_alias = sdk / "include/onnxruntime"
+    if not include_alias.exists():
+        include_alias.symlink_to(".", target_is_directory=True)
     build = work / "build"
     subprocess.run([
         "cmake", "-S", str(source), "-B", str(build), "-G", "Ninja",
@@ -52,6 +55,7 @@ def build_plugin(lock: dict, cache: Path, destination: Path, fetch) -> Path:
 
 def bundle_rocm(rocm: Path, destination: Path, plugin: Path) -> None:
     """Keep ROCm's relative library/data layout, including its HIPRTC subprocess."""
+    rocm = rocm.resolve()
     lib = rocm / "lib"
     if not lib.is_dir():
         raise RuntimeError(f"ROCm runtime is missing: {lib}")
@@ -69,7 +73,11 @@ def bundle_rocm(rocm: Path, destination: Path, plugin: Path) -> None:
                 continue
             target = destination / source.relative_to(rocm)
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
+            resolved = source.resolve()
+            if source.is_symlink() and resolved.is_relative_to(rocm):
+                target.symlink_to(os.path.relpath(destination / resolved.relative_to(rocm), target.parent))
+            else:
+                shutil.copy2(source, target)
     driver = rocm / "bin/migraphx-hiprtc-driver"
     if not driver.is_file():
         raise RuntimeError("MIGraphX runtime requires its HIPRTC driver; external clang is not bundled")
@@ -78,10 +86,13 @@ def bundle_rocm(rocm: Path, destination: Path, plugin: Path) -> None:
     for required in ("libmigraphx_c.so.3", "libamdhip64.so.7", "libhiprtc.so", "libamd_comgr.so"):
         if not any(destination.rglob(f"{required}*")):
             raise RuntimeError(f"bundled ROCm runtime is missing {required}")
+    for path in destination.rglob("*"):
+        if path.is_symlink() and not path.is_file():
+            raise RuntimeError(f"bundled ROCm link has no target: {path}")
     # Each ELF must resolve its own dependencies after installation, without /opt/rocm.
     libraries = []
     for path in destination.rglob("*"):
-        if path.is_file():
+        if path.is_file() and not path.is_symlink():
             with path.open("rb") as stream:
                 if stream.read(4) == b"\x7fELF":
                     libraries.append(path)
