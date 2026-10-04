@@ -23,6 +23,8 @@ def build_plugin(lock: dict, cache: Path, destination: Path, fetch) -> Path:
                 raise RuntimeError(f"unsafe source archive path: {member}")
         archive.extractall(work)
     source = work / f"onnxruntime-ep-amdgpu-{pinned['commit']}"
+    patch = Path(__file__).parent / "patches/migraphx-linux-env.patch"
+    subprocess.run(["patch", "--batch", "-p1", "-i", str(patch)], cwd=source, check=True)
     sdk_dir = work / "sdk"
     sdk_dir.mkdir(exist_ok=True)
     with tarfile.open(fetch(pinned["sdk"])) as archive:

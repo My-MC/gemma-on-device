@@ -1,0 +1,27 @@
+--- a/src/shared/common/platform/linux/env_var.h
++++ b/src/shared/common/platform/linux/env_var.h
+@@ -11,2 +11,3 @@
+ std::string GetEnvironmentVar(std::string_view name);
++void SetEnvironmentVar(std::string_view name, std::string_view value);
+ 
+--- a/src/shared/common/platform/linux/env_var.cc
++++ b/src/shared/common/platform/linux/env_var.cc
+@@ -5,5 +5,4 @@
+ 
+-#include "parse_string.h"
+-#include "platform/windows/env_var.h"
++#include <cstdlib>
+ 
+ namespace platform {
+@@ -9,2 +8,11 @@
+ namespace platform {
++void SetEnvironmentVar(const std::string_view name, const std::string_view value) {
++    const std::string key{name};
++    if (value.empty()) {
++        unsetenv(key.c_str());
++    } else {
++        const std::string content{value};
++        setenv(key.c_str(), content.c_str(), 1);
++    }
++}
+ std::string GetEnvironmentVar(const std::string_view name) {
