@@ -393,9 +393,19 @@ fn create_plugin_session(
         _ => anyhow::bail!("unsupported plugin registration: {registration_name}"),
     };
     let registration = registration_cache.get_or_init(|| {
-        env.register_ep_library(registration_name, &library_path)
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+        let library = env
+            .register_ep_library(registration_name, &library_path)
+            .map_err(|e| e.to_string())?;
+        if !env.devices().any(|device| {
+            device
+                .ep()
+                .is_ok_and(|name| name == execution_provider_name)
+        }) {
+            // A failed HIP enumeration must not prevent the next plugin's enumeration.
+            library.unregister().map_err(|e| e.to_string())?;
+            return Err(format!("{registration_name} EP has no usable device"));
+        }
+        Ok(())
     });
     registration
         .as_ref()
