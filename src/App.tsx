@@ -1,6 +1,6 @@
-import { useEffect, useId, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import "./App.css";
 
 type ModelInfo = {
@@ -59,7 +59,10 @@ function ModelVariantSelect({
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listboxRef = useRef<HTMLDivElement>(null);
-  const selectedIndex = Math.max(0, MODEL_VARIANTS.findIndex((option) => option.value === value));
+  const selectedIndex = Math.max(
+    0,
+    MODEL_VARIANTS.findIndex((option) => option.value === value),
+  );
   const [activeIndex, setActiveIndex] = useState(selectedIndex);
   const [open, setOpen] = useState(false);
   const selectedOption = MODEL_VARIANTS[selectedIndex];
@@ -73,7 +76,8 @@ function ModelVariantSelect({
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
     };
     document.addEventListener("pointerdown", closeOnOutsidePointer);
-    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+    return () =>
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
   }, [open, selectedIndex]);
 
   useEffect(() => {
@@ -102,7 +106,9 @@ function ModelVariantSelect({
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
-        setActiveIndex((index) => Math.min(index + 1, MODEL_VARIANTS.length - 1));
+        setActiveIndex((index) =>
+          Math.min(index + 1, MODEL_VARIANTS.length - 1),
+        );
         break;
       case "ArrowUp":
         event.preventDefault();
@@ -170,10 +176,18 @@ function ModelVariantSelect({
               key={option.value}
               className="model-variant-option"
               role="option"
+              tabIndex={-1}
               aria-selected={index === selectedIndex}
               data-active={index === activeIndex}
               onPointerDown={(event) => event.preventDefault()}
               onPointerMove={() => setActiveIndex(index)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  chooseOption(index);
+                }
+              }}
               onClick={(event) => {
                 event.stopPropagation();
                 chooseOption(index);
@@ -214,7 +228,9 @@ function formatBytes(b?: number) {
 }
 
 export default function App() {
-  const [prompt, setPrompt] = useState("こんにちは！Gemmaのオンデバイス推論について教えて。");
+  const [prompt, setPrompt] = useState(
+    "こんにちは！Gemmaのオンデバイス推論について教えて。",
+  );
   const [maxTokens, setMaxTokens] = useState(128);
   const [temperature, setTemperature] = useState(0.7);
   const [useChatTemplate, setUseChatTemplate] = useState(true);
@@ -231,12 +247,16 @@ export default function App() {
   // Download state
   const [variant, setVariant] = useState("1b-int4");
   const [downloading, setDownloading] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState<Record<string, DownloadProgress>>({});
-  const [downloadComplete, setDownloadComplete] = useState<string[] | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<
+    Record<string, DownloadProgress>
+  >({});
+  const [downloadComplete, setDownloadComplete] = useState<string[] | null>(
+    null,
+  );
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const streamTokensRef = useRef<string[]>([]);
 
-  const finalizeResult = (payload: GenerateResult) => {
+  const finalizeResult = useCallback((payload: GenerateResult) => {
     // Preserve partial streamed output when inference failed mid-generation
     const partialText = streamTokensRef.current.join("");
     const finalResult =
@@ -246,12 +266,16 @@ export default function App() {
     setResult(finalResult);
     setIsGenerating(false);
     setIsStreaming(false);
-  };
+  }, []);
 
   useEffect(() => {
     // Load system + model status
-    invoke<SystemInfo>("get_system_info").then(setSystem).catch(() => setSystem(null));
-    invoke<ModelInfo[]>("check_model_status").then(setModels).catch(() => {});
+    invoke<SystemInfo>("get_system_info")
+      .then(setSystem)
+      .catch(() => setSystem(null));
+    invoke<ModelInfo[]>("check_model_status")
+      .then(setModels)
+      .catch(() => {});
     invoke<string>("greet", { name: "Gemma" }).catch(() => {});
 
     const unlistenFns: (() => void)[] = [];
@@ -274,20 +298,27 @@ export default function App() {
       });
       if (cancelled) {
         u2();
-        unlistenFns.forEach((fn) => fn());
+        unlistenFns.forEach((fn) => {
+          fn();
+        });
         return;
       }
       unlistenFns.push(u2);
 
       const u3 = await listen<DownloadProgress>("download-progress", (e) => {
-        setDownloadProgress((prev) => ({ ...prev, [e.payload.file]: e.payload }));
+        setDownloadProgress((prev) => ({
+          ...prev,
+          [e.payload.file]: e.payload,
+        }));
         if (e.payload.error) {
           setDownloadError(e.payload.error);
         }
       });
       if (cancelled) {
         u3();
-        unlistenFns.forEach((fn) => fn());
+        unlistenFns.forEach((fn) => {
+          fn();
+        });
         return;
       }
       unlistenFns.push(u3);
@@ -295,25 +326,33 @@ export default function App() {
       const u4 = await listen<string[]>("download-complete", (e) => {
         setDownloadComplete(e.payload);
         setDownloading(false);
-        invoke<ModelInfo[]>("get_model_info").then(setModels).catch(() => {});
+        invoke<ModelInfo[]>("get_model_info")
+          .then(setModels)
+          .catch(() => {});
       });
       if (cancelled) {
         u4();
-        unlistenFns.forEach((fn) => fn());
+        unlistenFns.forEach((fn) => {
+          fn();
+        });
         return;
       }
       unlistenFns.push(u4);
     };
     setup().catch((e) => {
       console.error("listener setup failed", e);
-      unlistenFns.forEach((fn) => fn());
+      unlistenFns.forEach((fn) => {
+        fn();
+      });
     });
 
     return () => {
       cancelled = true;
-      unlistenFns.forEach((fn) => fn());
+      unlistenFns.forEach((fn) => {
+        fn();
+      });
     };
-  }, []);
+  }, [finalizeResult]);
 
   async function handleGenerate(stream: boolean) {
     setError(null);
@@ -340,7 +379,7 @@ export default function App() {
         const res = await invoke<GenerateResult>("generate", payload);
         finalizeResult(res);
       }
-    } catch (e: any) {
+    } catch (e) {
       setError(String(e));
       setIsGenerating(false);
       setIsStreaming(false);
@@ -352,9 +391,11 @@ export default function App() {
     setBench(null);
     setError(null);
     try {
-      const res = await invoke<BenchResult>("bench_inference", { iterations: 3 });
+      const res = await invoke<BenchResult>("bench_inference", {
+        iterations: 3,
+      });
       setBench(res);
-    } catch (e: any) {
+    } catch (e) {
       setError(String(e));
     } finally {
       setBenchRunning(false);
@@ -365,7 +406,7 @@ export default function App() {
     try {
       const m = await invoke<ModelInfo[]>("get_model_info");
       setModels(m);
-    } catch (e: any) {
+    } catch (e) {
       setError(String(e));
     }
   }
@@ -382,7 +423,7 @@ export default function App() {
       // also refresh models in case event missed
       const m = await invoke<ModelInfo[]>("get_model_info").catch(() => null);
       if (m) setModels(m);
-    } catch (e: any) {
+    } catch (e) {
       setDownloadError(String(e));
       setError(String(e));
     } finally {
@@ -398,13 +439,19 @@ export default function App() {
       <header className="header">
         <div className="header-title">
           <h1>Gemma On Device</h1>
-          <span className="subtitle">ort × Tauri × React (Bun) — マルチプラットフォーム推論検証</span>
+          <span className="subtitle">
+            ort × Tauri × React (Bun) — マルチプラットフォーム推論検証
+          </span>
         </div>
         <div className="header-badges">
           {system && (
             <>
-              <span className="badge">{system.platform}/{system.arch}</span>
-              <span className="badge ort">{system.ort_available ? "ort ✓" : "ort ✗"}</span>
+              <span className="badge">
+                {system.platform}/{system.arch}
+              </span>
+              <span className="badge ort">
+                {system.ort_available ? "ort ✓" : "ort ✗"}
+              </span>
             </>
           )}
           {primaryModel && (
@@ -419,10 +466,21 @@ export default function App() {
         <section className="card system-card">
           <div className="card-title">System</div>
           <div className="system-grid">
-            <div><strong>Platform</strong> {system.platform}/{system.arch}</div>
-            <div><strong>Model dir</strong> <code>{system.model_dir}</code></div>
-            <div><strong>Tauri</strong> {system.tauri_version}</div>
-            <div><strong>ort</strong> {system.ort_available ? "available (CPU default, EPs via features)" : "unavailable"}</div>
+            <div>
+              <strong>Platform</strong> {system.platform}/{system.arch}
+            </div>
+            <div>
+              <strong>Model dir</strong> <code>{system.model_dir}</code>
+            </div>
+            <div>
+              <strong>Tauri</strong> {system.tauri_version}
+            </div>
+            <div>
+              <strong>ort</strong>{" "}
+              {system.ort_available
+                ? "available (CPU default, EPs via features)"
+                : "unavailable"}
+            </div>
           </div>
         </section>
       )}
@@ -430,17 +488,30 @@ export default function App() {
       <section className="card">
         <div className="card-title row-between">
           <span>Models — Gemma モバイル向け (INT4推奨)</span>
-          <button className="small" onClick={refreshModels}>更新</button>
+          <button type="button" className="small" onClick={refreshModels}>
+            更新
+          </button>
         </div>
         <div className="model-grid">
-          {models.length === 0 && <p className="muted">モデル情報を取得中… (Tauri外では表示されません)</p>}
+          {models.length === 0 && (
+            <p className="muted">
+              モデル情報を取得中… (Tauri外では表示されません)
+            </p>
+          )}
           {models.map((m) => (
-            <div key={m.model_id} className={`model-card ${m.exists ? "exists" : "missing"}`}>
+            <div
+              key={m.model_id}
+              className={`model-card ${m.exists ? "exists" : "missing"}`}
+            >
               <div className="model-id">{m.model_id}</div>
               <div className="model-meta">
-                <span className={`pill ${m.quantization}`}>{m.quantization}</span>
+                <span className={`pill ${m.quantization}`}>
+                  {m.quantization}
+                </span>
                 <span className="muted">{formatBytes(m.size_bytes)}</span>
-                <span className={`pill ${m.exists ? "ok" : "warn"}`}>{m.exists ? "ready" : "missing"}</span>
+                <span className={`pill ${m.exists ? "ok" : "warn"}`}>
+                  {m.exists ? "ready" : "missing"}
+                </span>
               </div>
               <div className="model-desc">{m.description}</div>
               <code className="model-path">{m.onnx_path}</code>
@@ -460,11 +531,17 @@ export default function App() {
                 labelId="download-variant-label"
               />
             </div>
-            <button className="primary" onClick={handleDownload} disabled={downloading}>
+            <button
+              type="button"
+              className="primary"
+              onClick={handleDownload}
+              disabled={downloading}
+            >
               {downloading ? "ダウンロード中…" : "モデルをダウンロード"}
             </button>
             <span className="muted" style={{ fontSize: "0.78rem" }}>
-              Hugging Face (onnx-community) から取得。既存ファイルはスキップ。1GB超のため数分かかります。
+              Hugging Face (onnx-community)
+              から取得。既存ファイルはスキップ。1GB超のため数分かかります。
             </span>
           </div>
 
@@ -475,9 +552,13 @@ export default function App() {
                   <div className="dl-file">
                     <strong>{p.file}</strong>
                     <span className="muted">
-                      {formatBytes(p.downloaded)} {p.total ? `/ ${formatBytes(p.total)}` : ""} {p.percent != null ? `· ${p.percent.toFixed(1)}%` : ""}
+                      {formatBytes(p.downloaded)}{" "}
+                      {p.total ? `/ ${formatBytes(p.total)}` : ""}{" "}
+                      {p.percent != null ? `· ${p.percent.toFixed(1)}%` : ""}
                     </span>
-                    {p.done && !p.error && <span className="pill ok">done</span>}
+                    {p.done && !p.error && (
+                      <span className="pill ok">done</span>
+                    )}
                     {p.error && <span className="pill warn">error</span>}
                   </div>
                   <div className="progress-bar">
@@ -486,7 +567,11 @@ export default function App() {
                       style={{ width: `${p.percent ?? (p.done ? 100 : 0)}%` }}
                     />
                   </div>
-                  {p.error && <div className="error" style={{ marginTop: 6 }}>{p.error}</div>}
+                  {p.error && (
+                    <div className="error" style={{ marginTop: 6 }}>
+                      {p.error}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -494,17 +579,26 @@ export default function App() {
 
           {downloadComplete && (
             <div className="hint success">
-              ✓ ダウンロード完了: <code>{downloadComplete.length} files</code> — 自動で model ✓ に切替わり、生成で実推論が使われます。
+              ✓ ダウンロード完了: <code>{downloadComplete.length} files</code> —
+              自動で model ✓ に切替わり、生成で実推論が使われます。
               {downloadComplete.map((f) => (
-                <div key={f} style={{ fontSize: "0.75rem", wordBreak: "break-all" }}>{f}</div>
+                <div
+                  key={f}
+                  style={{ fontSize: "0.75rem", wordBreak: "break-all" }}
+                >
+                  {f}
+                </div>
               ))}
             </div>
           )}
-          {downloadError && !downloading && <div className="error">{downloadError}</div>}
+          {downloadError && !downloading && (
+            <div className="error">{downloadError}</div>
+          )}
         </div>
 
         <div className="hint">
-          CLI: <code>bun run download:model</code> でも取得可。配置前はモック推論でUI/パイプラインを検証できます。
+          CLI: <code>bun run download:model</code>{" "}
+          でも取得可。配置前はモック推論でUI/パイプラインを検証できます。
         </div>
       </section>
 
@@ -555,6 +649,7 @@ export default function App() {
 
           <div className="actions">
             <button
+              type="button"
               className="primary"
               disabled={isGenerating || !prompt.trim()}
               onClick={() => handleGenerate(false)}
@@ -562,13 +657,21 @@ export default function App() {
               {isGenerating && !isStreaming ? "生成中…" : "生成 (一括)"}
             </button>
             <button
+              type="button"
               className="primary outline"
               disabled={isGenerating || !prompt.trim()}
               onClick={() => handleGenerate(true)}
             >
-              {isGenerating && isStreaming ? "ストリーミング中…" : "生成 (ストリーム)"}
+              {isGenerating && isStreaming
+                ? "ストリーミング中…"
+                : "生成 (ストリーム)"}
             </button>
-            <button className="small" disabled={benchRunning} onClick={handleBench}>
+            <button
+              type="button"
+              className="small"
+              disabled={benchRunning}
+              onClick={handleBench}
+            >
               {benchRunning ? "計測中…" : "ベンチ実行"}
             </button>
           </div>
@@ -577,7 +680,9 @@ export default function App() {
 
           {isStreaming && streamTokens.length > 0 && (
             <div className="stream-box">
-              <div className="stream-label">streaming… {streamTokens.length} tokens</div>
+              <div className="stream-label">
+                streaming… {streamTokens.length} tokens
+              </div>
               <div className="stream-text">{streamTokens.join("")}</div>
             </div>
           )}
@@ -585,17 +690,30 @@ export default function App() {
           {result && (
             <div className="result">
               <div className="result-header">
-                <strong>{result.is_mock ? "MOCK" : "ort"} — {result.model_id}</strong>
+                <strong>
+                  {result.is_mock ? "MOCK" : "ort"} — {result.model_id}
+                </strong>
                 <span className="muted">
-                  {result.prompt_tokens} + {result.generated_tokens} = {result.total_tokens} tokens
-                  {" · "}{result.latency_ms} ms · {result.tokens_per_sec.toFixed(1)} tok/s
+                  {result.prompt_tokens} + {result.generated_tokens} ={" "}
+                  {result.total_tokens} tokens
+                  {" · "}
+                  {result.latency_ms} ms · {result.tokens_per_sec.toFixed(1)}{" "}
+                  tok/s
                 </span>
               </div>
               <pre className="result-text">{result.text}</pre>
-              {result.error && <div className="error" style={{ marginTop: 8 }}>{result.error}</div>}
+              {result.error && (
+                <div className="error" style={{ marginTop: 8 }}>
+                  {result.error}
+                </div>
+              )}
               <div className="result-meta">
-                <span className={`pill ${result.is_mock ? "warn" : "ok"}`}>{result.is_mock ? "mock pipeline" : "real inference"}</span>
-                {result.is_mock && <span className="muted">モデル配置で実推論に切替</span>}
+                <span className={`pill ${result.is_mock ? "warn" : "ok"}`}>
+                  {result.is_mock ? "mock pipeline" : "real inference"}
+                </span>
+                {result.is_mock && (
+                  <span className="muted">モデル配置で実推論に切替</span>
+                )}
               </div>
             </div>
           )}
@@ -604,17 +722,33 @@ export default function App() {
 
       {bench && (
         <section className="card bench">
-          <div className="card-title">Benchmark — {bench.iterations} iterations</div>
+          <div className="card-title">
+            Benchmark — {bench.iterations} iterations
+          </div>
           <div className="bench-grid">
-            <div><strong>Model</strong> {bench.model_id} {bench.is_mock && "(mock)"}</div>
-            <div><strong>Platform</strong> {bench.platform}/{bench.arch}</div>
-            <div><strong>Avg latency</strong> {bench.avg_latency_ms.toFixed(1)} ms</div>
-            <div><strong>Avg tok/s</strong> {bench.avg_tokens_per_sec.toFixed(1)}</div>
-            <div><strong>Total tokens</strong> {bench.total_tokens}</div>
-            <div><strong>Timestamp</strong> <code>{bench.timestamp}</code></div>
+            <div>
+              <strong>Model</strong> {bench.model_id}{" "}
+              {bench.is_mock && "(mock)"}
+            </div>
+            <div>
+              <strong>Platform</strong> {bench.platform}/{bench.arch}
+            </div>
+            <div>
+              <strong>Avg latency</strong> {bench.avg_latency_ms.toFixed(1)} ms
+            </div>
+            <div>
+              <strong>Avg tok/s</strong> {bench.avg_tokens_per_sec.toFixed(1)}
+            </div>
+            <div>
+              <strong>Total tokens</strong> {bench.total_tokens}
+            </div>
+            <div>
+              <strong>Timestamp</strong> <code>{bench.timestamp}</code>
+            </div>
           </div>
           <div className="hint">
-            合格目安: Desktop 5 tok/s / Mobile 2 tok/s (INT4)。<code>bun run bench</code> でも計測可。
+            合格目安: Desktop 5 tok/s / Mobile 2 tok/s (INT4)。
+            <code>bun run bench</code> でも計測可。
           </div>
         </section>
       )}
@@ -622,15 +756,33 @@ export default function App() {
       <section className="card howto">
         <div className="card-title">検証手順 (Bun)</div>
         <ol>
-          <li><code>bun install</code> — 依存取得</li>
-          <li>画面の「モデルをダウンロード」または <code>bun run download:model</code> — Gemma 1B INT4 + tokenizer 取得</li>
-          <li><code>bun run dev</code> — Viteのみ (ブラウザ確認)</li>
-          <li><code>bun run tauri dev</code> — Desktop推論</li>
-          <li><code>bun run tauri android dev</code> / <code>bun run tauri ios dev</code> — モバイル (要 NDK/Xcode, 並列検証)</li>
-          <li><code>bun run tauri build</code> — バンドル / <code>bun run bench</code> — CLIベンチ</li>
+          <li>
+            <code>bun install</code> — 依存取得
+          </li>
+          <li>
+            画面の「モデルをダウンロード」または{" "}
+            <code>bun run download:model</code> — Gemma 1B INT4 + tokenizer 取得
+          </li>
+          <li>
+            <code>bun run dev</code> — Viteのみ (ブラウザ確認)
+          </li>
+          <li>
+            <code>bun run tauri dev</code> — Desktop推論
+          </li>
+          <li>
+            <code>bun run tauri android dev</code> /{" "}
+            <code>bun run tauri ios dev</code> — モバイル (要 NDK/Xcode,
+            並列検証)
+          </li>
+          <li>
+            <code>bun run tauri build</code> — バンドル /{" "}
+            <code>bun run bench</code> — CLIベンチ
+          </li>
         </ol>
         <div className="ep-matrix">
-          <strong>EP matrix (ort features):</strong> Win: CPU/DirectML/CUDA · Mac: CPU/CoreML · Linux: CPU/CUDA · Android: CPU/NNAPI/XNNPACK · iOS: CPU/CoreML
+          <strong>EP matrix (ort features):</strong> Win: CPU/DirectML/CUDA ·
+          Mac: CPU/CoreML · Linux: CPU/CUDA · Android: CPU/NNAPI/XNNPACK · iOS:
+          CPU/CoreML
         </div>
       </section>
 

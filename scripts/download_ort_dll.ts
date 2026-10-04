@@ -25,7 +25,8 @@ const ORT_VERSION = "1.22.0";
 
 // SHA256 of `onnxruntime-win-x64-1.22.0.zip` (official microsoft/onnxruntime
 // v1.22.0 release asset). Bump together with ORT_VERSION.
-const EXPECTED_ZIP_SHA256 = "174c616efc0271194488642a72f1a514e01487da4dfe84c49296d66e40ebe0da";
+const EXPECTED_ZIP_SHA256 =
+  "174c616efc0271194488642a72f1a514e01487da4dfe84c49296d66e40ebe0da";
 
 interface PlatformAsset {
   dllName: string;
@@ -54,20 +55,28 @@ async function main(): Promise<void> {
   if (!asset) {
     // Only Windows maps `onnxruntime.dll` into the bundle (see
     // tauri.windows.conf.json); other platforms link `ort` statically.
-    console.log(`[download_ort_dll] No DLL required on ${platform}; nothing to do.`);
+    console.log(
+      `[download_ort_dll] No DLL required on ${platform}; nothing to do.`,
+    );
     return;
   }
 
   const { force } = parseArgs(process.argv.slice(2));
   if (!force && existsSync(target)) {
-    console.log(`[download_ort_dll] ${asset.dllName} already present at ${target}`);
+    console.log(
+      `[download_ort_dll] ${asset.dllName} already present at ${target}`,
+    );
     return;
   }
 
-  console.log(`[download_ort_dll] Fetching ${asset.assetName} from ${asset.url}`);
+  console.log(
+    `[download_ort_dll] Fetching ${asset.assetName} from ${asset.url}`,
+  );
   const res = await fetch(asset.url);
   if (!res.ok) {
-    throw new Error(`Failed to download ${asset.url}: ${res.status} ${res.statusText}`);
+    throw new Error(
+      `Failed to download ${asset.url}: ${res.status} ${res.statusText}`,
+    );
   }
 
   const buf = Buffer.from(await res.arrayBuffer());
@@ -80,10 +89,18 @@ async function main(): Promise<void> {
   console.log(`[download_ort_dll] SHA256 verified: ${sha256}`);
 
   // Use PowerShell's Expand-Archive on Windows (no native zip module in Bun).
-  const zipPath = join(process.cwd(), "target", `onnxruntime-${ORT_VERSION}.zip`);
+  const zipPath = join(
+    process.cwd(),
+    "target",
+    `onnxruntime-${ORT_VERSION}.zip`,
+  );
   await Bun.write(zipPath, buf);
 
-  const extractDir = join(process.cwd(), "target", `onnxruntime-extract-${ORT_VERSION}`);
+  const extractDir = join(
+    process.cwd(),
+    "target",
+    `onnxruntime-extract-${ORT_VERSION}`,
+  );
   mkdirSync(extractDir, { recursive: true });
   const extractProc = Bun.spawn(
     [
@@ -114,6 +131,8 @@ async function findFile(dir: string, name: string): Promise<string | null> {
 }
 
 main().catch((err) => {
-  console.error(`[download_ort_dll] ${err instanceof Error ? err.message : String(err)}`);
+  console.error(
+    `[download_ort_dll] ${err instanceof Error ? err.message : String(err)}`,
+  );
   process.exit(1);
 });

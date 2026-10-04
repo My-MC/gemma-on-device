@@ -14,7 +14,10 @@ function parseArgs(): Args {
   const promptIdx = process.argv.indexOf("--prompt");
   return {
     iters: itersIdx >= 0 ? Number(process.argv[itersIdx + 1]) || 3 : 3,
-    prompt: promptIdx >= 0 ? process.argv[promptIdx + 1] : "こんにちは、Gemmaの推論速度を計測しています。",
+    prompt:
+      promptIdx >= 0
+        ? process.argv[promptIdx + 1]
+        : "こんにちは、Gemmaの推論速度を計測しています。",
   };
 }
 
@@ -44,19 +47,28 @@ async function main() {
     const tokens = 32;
     const tps = tokens / (latency / 1000);
     results.push({ latency, tps });
-    console.log(`  iter ${i + 1}: ${latency.toFixed(1)} ms — ${tps.toFixed(1)} tok/s ${modelExists && tokExists ? "" : "(mock)"}`);
+    console.log(
+      `  iter ${i + 1}: ${latency.toFixed(1)} ms — ${tps.toFixed(1)} tok/s ${modelExists && tokExists ? "" : "(mock)"}`,
+    );
   }
 
-  const avgLatency = results.reduce((a, b) => a + b.latency, 0) / results.length;
+  const avgLatency =
+    results.reduce((a, b) => a + b.latency, 0) / results.length;
   const avgTps = results.reduce((a, b) => a + b.tps, 0) / results.length;
   console.log(`\n  avg latency: ${avgLatency.toFixed(1)} ms`);
-  console.log(`  avg tok/s:   ${avgTps.toFixed(1)} ${modelExists && tokExists ? "" : "(mock — real model not present)"}`);
+  console.log(
+    `  avg tok/s:   ${avgTps.toFixed(1)} ${modelExists && tokExists ? "" : "(mock — real model not present)"}`,
+  );
   console.log(`\n  Thresholds: Desktop 5 tok/s / Mobile 2 tok/s (INT4)`);
-  console.log(`  Result: ${avgTps >= 5 ? "PASS (desktop)" : avgTps >= 2 ? "PASS (mobile)" : "FAIL (mock baseline)"} — mock values expected without model`);
+  console.log(
+    `  Result: ${avgTps >= 5 ? "PASS (desktop)" : avgTps >= 2 ? "PASS (mobile)" : "FAIL (mock baseline)"} — mock values expected without model`,
+  );
 
   // Also try invoking Tauri Rust bench if built
   // This is a placeholder for future cargo integration
-  console.log(`\n  Tip: For real Rust bench, run: bun run tauri dev then click "ベンチ実行" in UI, or: cargo run -p gemma-on-device --features bench`);
+  console.log(
+    `\n  Tip: For real Rust bench, run: bun run tauri dev then click "ベンチ実行" in UI, or: cargo run -p gemma-on-device --features bench`,
+  );
 }
 
 main().catch((e) => {
