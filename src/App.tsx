@@ -22,6 +22,7 @@ type GenerateResult = {
   tokens_per_sec: number;
   is_mock: boolean;
   model_id: string;
+  execution_provider: string;
   error?: string;
 };
 
@@ -692,7 +693,8 @@ export default function App() {
             <div className="result">
               <div className="result-header">
                 <strong>
-                  {result.is_mock ? "MOCK" : result.execution_provider} — {result.model_id}
+                  {result.is_mock ? "MOCK" : result.execution_provider} —{" "}
+                  {result.model_id}
                 </strong>
                 <span className="muted">
                   {result.prompt_tokens} + {result.generated_tokens} ={" "}
