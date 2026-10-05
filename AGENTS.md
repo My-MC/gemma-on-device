@@ -93,6 +93,7 @@ Agents may work in a Git worktree. Each worktree is an isolated working director
 - **Tokenizers**: Downloading 3n replaces `tokenizer.json` with a different hash. Restore the 1B tokenizer with `bun run download:model:1b` before 1B inference; restart an app that already cached a session after replacing model files.
 - **3n download limitation**: The Rust downloader treats failed 3n `.onnx_data` downloads as optional and can emit `download-complete` for a partial download. The Bun downloader fails instead. Neither completion nor status proves 3n inference readiness.
 - **Runtime resources**: Windows builds stage `target/release/onnxruntime.dll` via `scripts/download_ort_dll.ts` and `tauri.windows.conf.json`. Default `beforeBuildCommand` runs DLL staging (a no-op outside Windows) and the frontend build. Linux/macOS builds use the linked runtime and have no DLL bundle resource.
+- **GPU runtime loading**: GPU editions bundle a dynamic runtime. CUDA bundles must place `onnxruntime_providers_shared.dll` / `libonnxruntime_providers_shared.so` beside the core and CUDA provider. Linux dependency preloading must exclude all `libonnxruntime*` libraries: loading providers before ORT initializes its host can crash the process. Preload dependencies from the selected core's parent directory.
 
 ## Context7 / Context-Mode (Mandatory)
 

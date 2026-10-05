@@ -240,6 +240,17 @@ bun run tauri:coreml     # macOS 14+ Apple Silicon: CoreML → WebGPU → CPU
 
 CUDA uses ONNX Runtime 1.30.0, CUDA 13, and cuDNN 9. The CUDA edition bundles ONNX Runtime, WebGPU, cuBLAS, and other pinned NVIDIA user-space libraries. Users need a compatible NVIDIA GPU driver; the CUDA Toolkit is not required. Windows may also require the current Microsoft Visual C++ Redistributable x64.
 
+On WSL2, use the NVIDIA driver installed on Windows and confirm `nvidia-smi` works inside WSL. Launch the GUI from a WSLg terminal with `DISPLAY` configured; use the software-rendering environment variables above if needed. Linux preloads bundled dependency libraries from the selected ONNX Runtime directory, leaving provider loading to ONNX Runtime after initialization. CUDA packaging places the shared provider library beside the core and CUDA provider. Rebuild older CUDA bundles with `bun run tauri:cuda` to include this layout.
+
+To validate CUDA with the downloaded, SHA256-verified 1B model on Linux (including WSL2), run this smoke test separately from other runtime tests. It requires CUDA rather than accepting CPU fallback and checks streaming plus cached-session inference:
+
+```bash
+GEMMA_CUDA_TEST_RUNTIME="$PWD/runtime-artifacts/linux-x64/cuda" \
+GEMMA_CUDA_TEST_MODELS="$PWD/models" \
+cargo test --release --manifest-path src-tauri/Cargo.toml --features desktop-cuda \
+  cuda_real_inference_smoke -- --ignored --nocapture
+```
+
 The Linux AMD edition bundles the standalone [MIGraphX plugin EP](https://github.com/onnxruntime/onnxruntime-ep-amdgpu) and ROCm 7.2.1 user-space libraries. MIGraphX, WebGPU, and CPU use the same ONNX Runtime 1.30.0 process and cached inference session. Users need a compatible AMD GPU and kernel driver; ROCm and MIGraphX do not need to be installed separately. This project's AMD bundle currently targets Linux x64; the upstream plugin also has Windows build support.
 
 Building this edition requires ROCm 7.2.1 with `migraphx`, `migraphx-dev`, `hip-dev`, and AMD's `hipcc`, CMake 4.2+, Ninja, patch, and patchelf. `scripts/build_migraphx_plugin.py` builds the SHA256-pinned upstream source against the pinned ORT 1.30.0 SDK. The source revision is selected for ROCm 7.2.1 compatibility; upstream main can require newer MIGraphX APIs. A small Linux environment-helper patch is applied from `scripts/patches/`. Use the AMD ROCm repository's `hipcc` rather than Ubuntu's older package. The Debian installer declares the runtime's `libnuma`, `libelf`, and `libdrm` system dependencies so the package manager can resolve them. Packaging includes the HIPRTC driver, ROCm shared libraries and kernel data, and relocates their library search paths. Set `ROCM_PATH` if ROCm is installed outside `/opt/rocm`; `GEMMA_MIGRAPHX_EP_LIBRARY` overrides the plugin path for development.
