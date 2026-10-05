@@ -486,7 +486,13 @@ pub fn resolve_model_dir() -> PathBuf {
     PathBuf::from("models")
 }
 
-#[cfg(test)]
+#[cfg(all(
+    test,
+    any(
+        feature = "migraphx",
+        all(target_os = "macos", target_arch = "aarch64", feature = "coreml")
+    )
+))]
 mod tests {
     use super::*;
 

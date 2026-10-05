@@ -337,6 +337,52 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
 
+    #[cfg(all(target_os = "linux", feature = "cuda"))]
+    #[tokio::test]
+    #[ignore = "requires a staged CUDA runtime, NVIDIA GPU, and verified 1B model"]
+    async fn cuda_real_inference_smoke() {
+        let runtime = std::path::PathBuf::from(
+            std::env::var("GEMMA_CUDA_TEST_RUNTIME").expect("GEMMA_CUDA_TEST_RUNTIME"),
+        );
+        crate::preload_runtime_dependencies(&runtime);
+        assert!(ort::init_from(runtime.join("libonnxruntime.so"))
+            .expect("initialize bundled ORT")
+            .commit());
+        let state = AppState::new(
+            std::path::PathBuf::from(
+                std::env::var("GEMMA_CUDA_TEST_MODELS").expect("GEMMA_CUDA_TEST_MODELS"),
+            ),
+            runtime,
+        );
+        let opts = GenerateOptions {
+            prompt: "こんにちは".to_string(),
+            max_tokens: Some(8),
+            temperature: None,
+            use_chat_template: Some(true),
+        };
+        let emitted = Arc::new(Mutex::new(String::new()));
+        let captured = Arc::clone(&emitted);
+        let result = generate_stream(&state, opts.clone(), move |token| {
+            captured.lock().unwrap().push_str(&token);
+            Ok(())
+        })
+        .await
+        .expect("CUDA streaming inference");
+        assert_eq!(result.execution_provider, "CUDA");
+        assert!(!result.is_mock);
+        assert!(!result.text.is_empty());
+        assert_eq!(*emitted.lock().unwrap(), result.text);
+        let repeated = generate_text(&state, opts)
+            .await
+            .expect("cached CUDA inference");
+        assert_eq!(repeated.execution_provider, "CUDA");
+        assert!(!repeated.text.is_empty());
+        println!(
+            "CUDA streaming and cached inference passed: {}",
+            result.text
+        );
+    }
+
     #[tokio::test]
     #[ignore]
     async fn real_inference_smoke() {

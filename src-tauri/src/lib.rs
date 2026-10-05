@@ -263,9 +263,6 @@ fn add_runtime_dll_directory(path: &std::path::Path) {
 fn init_ort(app: &tauri::AppHandle) {
     use std::path::PathBuf;
 
-    if let Ok(resources) = app.path().resource_dir() {
-        preload_runtime_dependencies(&resources.join("ort-runtime"));
-    }
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Ok(path) = std::env::var("ORT_DYLIB_PATH") {
         candidates.push(PathBuf::from(path));
@@ -281,6 +278,9 @@ fn init_ort(app: &tauri::AppHandle) {
     }
 
     if let Some(path) = candidates.into_iter().find(|path| path.exists()) {
+        if let Some(runtime) = path.parent() {
+            preload_runtime_dependencies(runtime);
+        }
         #[cfg(feature = "migraphx")]
         if let Some(runtime) = path.parent() {
             let database = runtime.join("migraphx/share/miopen/db");
@@ -331,7 +331,8 @@ fn preload_runtime_dependencies(runtime_dir: &std::path::Path) {
                 }
             } else if path.file_name().is_some_and(|name| {
                 let name = name.to_string_lossy();
-                name.contains(".so") && !name.starts_with("libonnxruntime.so")
+                // ORT must initialize its provider host before loading provider libraries.
+                name.contains(".so") && !name.starts_with("libonnxruntime")
             }) {
                 pending.push(path);
             }

@@ -128,6 +128,7 @@ def main() -> None:
     required = ["onnxruntime_providers_webgpu.dll" if target.startswith("win32") else "libonnxruntime_providers_webgpu.dylib" if target.startswith("macos") else "libonnxruntime_providers_webgpu.so"]
     if edition == "cuda":
         required.append("onnxruntime_providers_cuda.dll" if target.startswith("win32") else "libonnxruntime_providers_cuda.so")
+        required.append("onnxruntime_providers_shared.dll" if target.startswith("win32") else "libonnxruntime_providers_shared.so")
     for name in required:
         found = find_file(destination, lambda candidate, expected=name: candidate == expected)
         if found.parent != destination:

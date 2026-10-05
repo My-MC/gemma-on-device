@@ -97,6 +97,9 @@ if (edition === "cuda") {
     process.platform === "win32"
       ? "onnxruntime_providers_cuda.dll"
       : "libonnxruntime_providers_cuda.so",
+    process.platform === "win32"
+      ? "onnxruntime_providers_shared.dll"
+      : "libonnxruntime_providers_shared.so",
   );
 }
 if (edition === "migraphx") {
@@ -167,7 +170,7 @@ if (process.platform === "win32") {
 }
 await Bun.write(
   join(staged, "runtime-manifest.json"),
-  JSON.stringify(manifest, null, 2) + "\n",
+  `${JSON.stringify(manifest, null, 2)}\n`,
 );
 
 const cargoFeature = `desktop-${edition}`;
