@@ -50,6 +50,7 @@ pub async fn generate_text(state: &AppState, opts: GenerateOptions) -> Result<Ge
 
     // Mock path when model/tokenizer missing - allows UI validation without 1GB download
     if !model_path.exists() || !tok_path.exists() {
+        state.report_execution_provider(Some("Mock"));
         return Ok(mock_generate(&opts.prompt, max_tokens));
     }
 
@@ -122,6 +123,7 @@ async fn try_real_inference(
         .as_ref()
         .map(|session| session.execution_provider.clone())
         .unwrap_or_else(|| "CPU".to_string());
+    state.report_execution_provider(Some(&execution_provider));
 
     let mut generated_ids: Vec<i64> = Vec::new();
     let mut current_ids = input_ids.clone();
@@ -150,6 +152,7 @@ async fn try_real_inference(
                 Err(error) if iteration == 0 => {
                     let error = error.to_string();
                     failed_providers.push(active_provider.clone());
+                    state.report_execution_provider(None);
                     let (replacement, replacement_provider) = super::session::create_session(
                         &model_path,
                         &state.runtime_dir,
@@ -167,6 +170,7 @@ async fn try_real_inference(
                         model_info,
                     });
                     execution_provider = replacement_provider;
+                    state.report_execution_provider(Some(&execution_provider));
                 }
                 Err(error) => return Err(anyhow::anyhow!("ort run error: {error}")),
             }
@@ -311,6 +315,7 @@ pub async fn generate_stream(
     let tok_path = state.default_tokenizer_path();
 
     if !model_path.exists() || !tok_path.exists() {
+        state.report_execution_provider(Some("Mock"));
         let res = mock_generate(&opts.prompt, max_tokens);
         // Simulate token-by-token emit
         for tok in res.text.split_whitespace() {

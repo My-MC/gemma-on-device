@@ -23,6 +23,7 @@ pub struct AppState {
     pub model_integrity: tokio::sync::OnceCell<()>,
     pub model_dir: PathBuf,
     pub runtime_dir: PathBuf,
+    pub app_handle: Option<tauri::AppHandle>,
 }
 
 pub struct InferenceSession {
@@ -64,6 +65,17 @@ impl AppState {
             model_integrity: tokio::sync::OnceCell::new(),
             model_dir,
             runtime_dir,
+            app_handle: None,
+        }
+    }
+
+    pub fn report_execution_provider(&self, provider: Option<&str>) {
+        use tauri::Emitter;
+
+        if let Some(app) = &self.app_handle {
+            if let Err(error) = app.emit("runtime-changed", provider) {
+                eprintln!("[emit] runtime-changed failed: {error}");
+            }
         }
     }
 

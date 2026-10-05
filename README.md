@@ -216,6 +216,7 @@ sha256sum models/tokenizer.json
 
 - Enter a prompt → **Generate (single)** calls `invoke("generate")`, **Generate (stream)** calls `invoke("generate_stream")` → `listen("token")` + `listen("generation-complete")` for incremental display (`src/App.tsx`)
 - **Run bench** → `bench_inference` shows `avg tok/s` / `avg latency`
+- The header shows the execution provider selected for the current generation or benchmark, updates when inference falls back to another provider, and distinguishes preparing, mock execution, and the last completed runtime. The static EP list at the bottom is removed.
 
 **CLI**:
 

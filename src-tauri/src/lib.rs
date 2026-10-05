@@ -133,7 +133,9 @@ pub fn run() {
             let _ = std::fs::create_dir_all(&model_dir);
             let runtime_dir = resolve_runtime_dir(app.handle());
             // Also ensure app_data_dir exists for logs
-            app.manage(AppState::new(model_dir, runtime_dir));
+            let mut state = AppState::new(model_dir, runtime_dir);
+            state.app_handle = Some(app.handle().clone());
+            app.manage(state);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
