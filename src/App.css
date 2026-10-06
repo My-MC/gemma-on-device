@@ -346,6 +346,18 @@ textarea {
   gap: 8px;
 }
 
+.form .checkbox {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.form .checkbox label {
+  display: block;
+  cursor: pointer;
+}
+
 .actions {
   display: flex;
   gap: 8px;
@@ -444,6 +456,295 @@ button:disabled {
   gap: 8px;
   font-size: 0.85rem;
 }
+
+/* Material 3 compatibility roles for the existing application selectors. */
+:root {
+  color-scheme: light;
+  --bg: var(--background);
+  --surface: var(--card);
+  --surface-alt: var(--surface-container-low);
+  --sunken: var(--surface-container);
+  --raised: var(--surface-container-high);
+  --text: var(--foreground);
+  --text-muted: var(--muted-foreground);
+  --text-subtle: var(--on-surface-variant);
+  --text-soft: var(--on-surface-variant);
+  --border: var(--outline-variant);
+  --border-input: var(--outline-variant);
+  --input-bg: var(--surface-container-low);
+  --btn-primary-bg: var(--primary);
+  --btn-primary-fg: var(--primary-foreground);
+  --outline-bg: var(--surface-container-low);
+  --outline-fg: var(--foreground);
+  --chip-bg: var(--surface-container-high);
+  --info-bg: var(--secondary);
+  --info-fg: var(--secondary-foreground);
+  --int8-bg: var(--accent);
+  --int8-fg: var(--accent-foreground);
+  --ok-bg: var(--success-container);
+  --ok-fg: var(--success);
+  --warn-bg: var(--warning-container);
+  --warn-fg: var(--warning);
+  --exists-bg: color-mix(in srgb, var(--success-container) 28%, var(--card));
+  --exists-border: var(--success);
+  --missing-bg: color-mix(in srgb, var(--warning-container) 32%, var(--card));
+  --missing-border: var(--warning);
+  --error-bg: color-mix(in srgb, var(--destructive) 12%, var(--card));
+  --error-fg: var(--destructive);
+  --error-border: var(--destructive);
+  --stream-bg: var(--surface-container-low);
+  --stream-border: var(--primary);
+  --success-bg: color-mix(in srgb, var(--success-container) 35%, var(--card));
+  --success-border: var(--success);
+  --fill-from: var(--primary);
+  --fill-to: color-mix(in srgb, var(--primary) 72%, var(--secondary));
+}
+
+.app {
+  width: min(100% - 32px, 1360px);
+  max-width: none;
+  min-height: 100vh;
+  padding: 24px 0 40px;
+  gap: 20px;
+}
+
+.header {
+  align-items: center;
+  gap: 20px;
+  border-radius: 24px;
+  padding: 20px 24px;
+  box-shadow: none;
+}
+
+.header-title h1 {
+  font-size: 1.35rem;
+  letter-spacing: -0.025em;
+}
+
+.subtitle {
+  color: var(--on-surface-variant);
+}
+
+.primary-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.nav-item {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  color: var(--on-surface-variant);
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
+}
+
+.nav-item:hover {
+  background: var(--surface-container-high);
+}
+
+.nav-item[aria-current="page"] {
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+}
+
+.header-badges {
+  align-items: center;
+}
+
+.card {
+  padding: 24px;
+  border: 1px solid var(--outline-variant);
+  border-radius: 24px;
+  box-shadow: none;
+}
+
+.card [data-slot="button"] {
+  min-height: 48px;
+  border-radius: 999px;
+}
+
+.card-title {
+  font-size: 1.125rem;
+  font-weight: 650;
+}
+
+.model-card,
+.bench-grid > div {
+  border-radius: 16px;
+}
+
+.form textarea,
+.form input,
+.download-variant-select,
+.theme-setting select,
+.benchmark-prompt textarea {
+  min-height: 48px;
+  color: var(--foreground);
+  background: var(--surface-container-low);
+  border: 1px solid var(--outline-variant);
+  border-radius: 12px;
+}
+
+.form textarea,
+.benchmark-prompt textarea {
+  min-height: 112px;
+}
+
+.primary,
+button.primary,
+button.small,
+.actions button {
+  min-height: 48px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.primary-nav button:focus-visible,
+.primary:focus-visible,
+button.small:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 3px;
+}
+
+.page-generate > .model-page,
+.page-generate > .benchmark-page,
+.page-generate > .info-page,
+.page-models > .generate-page,
+.page-models > .benchmark-page,
+.page-models > .info-page,
+.page-benchmark > .generate-page,
+.page-benchmark > .model-page,
+.page-benchmark > .info-page,
+.page-info > .generate-page,
+.page-info > .model-page,
+.page-info > .benchmark-page,
+.page-generate > .footer,
+.page-models > .footer,
+.page-benchmark > .footer {
+  display: none;
+}
+
+.page-benchmark > .benchmark-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.benchmark-page .card-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.benchmark-prompt,
+.theme-setting {
+  display: grid;
+  gap: 8px;
+  color: var(--text-subtle);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.benchmark-prompt textarea {
+  width: 100%;
+  padding: 12px 14px;
+  resize: vertical;
+}
+
+.theme-setting {
+  grid-template-columns: 1fr minmax(220px, 320px);
+  align-items: center;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.theme-setting > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.theme-setting select {
+  padding: 0 12px;
+}
+
+@media (min-width: 840px) {
+  .generate-page .form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 0.8fr);
+    gap: 20px;
+  }
+}
+
+@media (max-width: 839px) {
+  .app {
+    width: min(100% - 32px, 720px);
+    padding-bottom: calc(100px + env(safe-area-inset-bottom));
+  }
+
+  .header {
+    flex-wrap: wrap;
+    padding: 18px;
+  }
+
+  .header-title {
+    flex: 1 1 220px;
+  }
+
+  .primary-nav {
+    position: fixed;
+    z-index: 10;
+    right: max(12px, env(safe-area-inset-right));
+    bottom: max(10px, env(safe-area-inset-bottom));
+    left: max(12px, env(safe-area-inset-left));
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 2px;
+    padding: 6px;
+    margin: 0;
+    background: var(--surface-container-low);
+    border: 1px solid var(--outline-variant);
+    border-radius: 24px;
+    box-shadow: 0 6px 24px rgb(20 30 45 / 16%);
+  }
+
+  .nav-item {
+    min-width: 0;
+    min-height: 52px;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 2px;
+    font-size: 0.6875rem;
+  }
+
+  .card {
+    padding: 20px;
+  }
+}
+
+@media (max-width: 480px) {
+  .header-badges {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .theme-setting {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 600px) {
   .bench-grid {
     grid-template-columns: 1fr;
@@ -481,8 +782,8 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
-.download-controls label,
-.download-controls .download-variant-field {
+.app .download-controls label,
+.app .download-controls .download-variant-field {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -596,7 +897,7 @@ button:disabled {
   transition: width 0.2s;
 }
 
-.footer {
+.app .footer {
   text-align: center;
   font-size: 0.75rem;
   margin-top: 8px;

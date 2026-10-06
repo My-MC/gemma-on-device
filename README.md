@@ -18,6 +18,8 @@ A Tauri application to validate whether Rust `ort` (ONNX Runtime) can run Gemma 
 | Frontend | `React` | `^19.3.0` + `react-dom ^19.3.0` | UI |
 | Frontend | `Vite` | `^8.3.0` + `@vitejs/plugin-react ^6.1.1` | Build, `devUrl http://localhost:1420` |
 | Frontend | `TypeScript` | `~7.0.2` | Types |
+| UI | `shadcn/ui` | `^4.21.3` + `radix-ui ^1.7.0` | Accessible, customizable components |
+| UI styling | `Tailwind CSS` | `^4.3.3` + `@tailwindcss/vite ^4.3.3` | Design tokens and utility styling |
 | Tauri JS | `@tauri-apps/api` `cli` | `2.12` | `invoke` / `listen` / `emit` |
 | Tauri JS plugin | `@tauri-apps/plugin-opener` | `2.7` | Open URLs and files |
 | Models | Gemma 3 1B INT4 / 3n E2B INT4 | `onnx-community` | Community ONNX, INT4 quantized |
@@ -302,7 +304,7 @@ Non-mobile debug builds prefer existing project `models/` for compatibility with
 bun run tauri android init
 bun run tauri android dev
 
-# iOS 15.1+ (requires Xcode, macOS only)
+# iOS 16.4+ (requires Xcode, macOS only)
 rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
 brew install xcodegen libimobiledevice cocoapods
 bun run tauri ios init
@@ -320,7 +322,7 @@ iOS creates an unsigned ARM64 release IPA without signing secrets. Download the 
 
 The generated Xcode project lives in `src-tauri/gen/apple`. Set
 `bundle.iOS.developmentTeam` in `src-tauri/tauri.conf.json` to the team reported
-by `bun run tauri info` for signed builds. `src-tauri/tauri.conf.json` sets minimum iOS version 15.1. The generated project is ignored; after initialization, verify that its deployment settings still specify 15.1 before building.
+by `bun run tauri info` for signed builds. `src-tauri/tauri.conf.json` sets minimum iOS version 16.4 to match the frontend browser requirements. The generated project is ignored; after initialization, verify that its deployment settings still specify 16.4 before building.
 
 For a physical device, connect and unlock the iPhone, trust the Mac, enable
 Developer Mode, and confirm that it appears under `xcrun xctrace list devices`.

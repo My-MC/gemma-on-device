@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { Cpu, Gauge, House, Settings2, Sun } from "lucide-react";
 import {
   lazy,
   Suspense,
@@ -9,6 +10,16 @@ import {
   useRef,
   useState,
 } from "react";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  applyThemeMode,
+  readThemeMode,
+  saveThemeMode,
+  type ThemeMode,
+} from "@/lib/theme";
 import "./App.css";
 
 const LicenseDialog = lazy(() =>
@@ -53,6 +64,14 @@ type BenchResult = {
   execution_provider: string;
   timestamp: string;
 };
+
+type PageId = "generate" | "models" | "benchmark" | "info";
+const pages: { id: PageId; label: string; Icon: typeof House }[] = [
+  { id: "generate", label: "生成", Icon: House },
+  { id: "models", label: "モデル", Icon: Cpu },
+  { id: "benchmark", label: "ベンチマーク", Icon: Gauge },
+  { id: "info", label: "アプリ情報", Icon: Settings2 },
+];
 
 const MODEL_VARIANTS = [
   { value: "1b-int4", label: "1B INT4 (推奨, ~1.2GB, community ONNX)" },
@@ -244,6 +263,8 @@ function formatBytes(b?: number) {
 }
 
 export default function App() {
+  const [activePage, setActivePage] = useState<PageId>("generate");
+  const [themeMode, setThemeMode] = useState<ThemeMode>(readThemeMode);
   const [showLicenses, setShowLicenses] = useState(false);
   const closeLicenses = useCallback(() => setShowLicenses(false), []);
   const [prompt, setPrompt] = useState(
@@ -275,6 +296,17 @@ export default function App() {
   );
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const streamTokensRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    saveThemeMode(themeMode);
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const applyTheme = () => applyThemeMode(themeMode);
+    applyTheme();
+    if (themeMode === "system") {
+      media.addEventListener("change", applyTheme);
+      return () => media.removeEventListener("change", applyTheme);
+    }
+  }, [themeMode]);
 
   const finalizeResult = useCallback((payload: GenerateResult) => {
     // Preserve partial streamed output when inference failed mid-generation
@@ -475,14 +507,26 @@ export default function App() {
   const downloadEntries = Object.values(downloadProgress);
 
   return (
-    <main className="app">
+    <main className={`app page-${activePage}`}>
       <header className="header">
         <div className="header-title">
           <h1>Gemma On Device</h1>
-          <span className="subtitle">
-            ort × Tauri × React (Bun) — マルチプラットフォーム推論検証
-          </span>
+          <span className="subtitle">オンデバイスでGemmaを実行・検証</span>
         </div>
+        <nav className="primary-nav" aria-label="メインメニュー">
+          {pages.map(({ id, label, Icon }) => (
+            <button
+              key={id}
+              type="button"
+              className="nav-item"
+              aria-current={activePage === id ? "page" : undefined}
+              onClick={() => setActivePage(id)}
+            >
+              <Icon aria-hidden="true" size={20} />
+              <span>{label}</span>
+            </button>
+          ))}
+        </nav>
         <div className="header-badges">
           <div className="runtime-status" role="status" aria-live="polite">
             <span className="runtime-label">
@@ -506,39 +550,46 @@ export default function App() {
           )}
           {primaryModel && (
             <span className={`badge ${primaryModel.exists ? "ok" : "warn"}`}>
-              {primaryModel.exists ? "model ✓" : "model ✗ (mock)"}
+              {primaryModel.exists
+                ? "モデル準備完了"
+                : "モデルなし・モック生成"}
             </span>
           )}
         </div>
       </header>
 
       {system && (
-        <section className="card system-card">
-          <div className="card-title">System</div>
+        <section className="card system-card page-section info-page">
+          <div className="card-title">このデバイス</div>
           <div className="system-grid">
             <div>
-              <strong>Platform</strong> {system.platform}/{system.arch}
+              <strong>プラットフォーム</strong> {system.platform}/{system.arch}
             </div>
             <div>
-              <strong>Model dir</strong> <code>{system.model_dir}</code>
+              <strong>モデルの保存先</strong> <code>{system.model_dir}</code>
             </div>
             <div>
               <strong>Tauri</strong> {system.tauri_version}
             </div>
             <div>
               <strong>ort</strong>{" "}
-              {system.ort_available ? "available" : "unavailable"}
+              {system.ort_available ? "使用可能" : "使用不可"}
             </div>
           </div>
         </section>
       )}
 
-      <section className="card">
+      <section className="card page-section model-page">
         <div className="card-title row-between">
-          <span>Models — Gemma モバイル向け (INT4推奨)</span>
-          <button type="button" className="small" onClick={refreshModels}>
+          <span>モデル管理</span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={refreshModels}
+          >
             更新
-          </button>
+          </Button>
         </div>
         <div className="model-grid">
           {models.length === 0 && (
@@ -558,7 +609,7 @@ export default function App() {
                 </span>
                 <span className="muted">{formatBytes(m.size_bytes)}</span>
                 <span className={`pill ${m.exists ? "ok" : "warn"}`}>
-                  {m.exists ? "ready" : "missing"}
+                  {m.exists ? "利用できます" : "未配置"}
                 </span>
               </div>
               <div className="model-desc">{m.description}</div>
@@ -571,7 +622,7 @@ export default function App() {
           <div className="download-title">画面からダウンロード</div>
           <div className="download-controls">
             <div className="download-variant-field">
-              <span id="download-variant-label">Variant</span>
+              <span id="download-variant-label">モデル</span>
               <ModelVariantSelect
                 value={variant}
                 onChange={setVariant}
@@ -579,14 +630,15 @@ export default function App() {
                 labelId="download-variant-label"
               />
             </div>
-            <button
+            <Button
               type="button"
+              variant="default"
               className="primary"
               onClick={handleDownload}
               disabled={downloading}
             >
               {downloading ? "ダウンロード中…" : "モデルをダウンロード"}
-            </button>
+            </Button>
             <span className="muted" style={{ fontSize: "0.78rem" }}>
               Hugging Face (onnx-community)
               から取得。既存ファイルはスキップ。1GB超のため数分かかります。
@@ -605,9 +657,9 @@ export default function App() {
                       {p.percent != null ? `· ${p.percent.toFixed(1)}%` : ""}
                     </span>
                     {p.done && !p.error && (
-                      <span className="pill ok">done</span>
+                      <span className="pill ok">完了</span>
                     )}
-                    {p.error && <span className="pill warn">error</span>}
+                    {p.error && <span className="pill warn">エラー</span>}
                   </div>
                   <div className="progress-bar">
                     <div
@@ -628,7 +680,7 @@ export default function App() {
           {downloadComplete && (
             <div className="hint success">
               ✓ ダウンロード完了: <code>{downloadComplete.length} files</code> —
-              自動で model ✓ に切替わり、生成で実推論が使われます。
+              モデル欄でファイルの状態を確認してから生成してください。
               {downloadComplete.map((f) => (
                 <div
                   key={f}
@@ -650,12 +702,13 @@ export default function App() {
         </div>
       </section>
 
-      <section className="card">
-        <div className="card-title">Inference — プロンプト & パラメータ</div>
+      <section className="card page-section generate-page">
+        <div className="card-title">テキスト生成</div>
         <div className="form">
-          <label>
-            Prompt
-            <textarea
+          <label htmlFor="generation-prompt">
+            プロンプト
+            <Textarea
+              id="generation-prompt"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               rows={3}
@@ -664,9 +717,10 @@ export default function App() {
           </label>
 
           <div className="controls">
-            <label>
-              Max tokens
-              <input
+            <label htmlFor="max-tokens">
+              最大トークン数
+              <Input
+                id="max-tokens"
                 type="number"
                 min={16}
                 max={512}
@@ -674,9 +728,10 @@ export default function App() {
                 onChange={(e) => setMaxTokens(Number(e.target.value))}
               />
             </label>
-            <label>
-              Temperature
-              <input
+            <label htmlFor="temperature">
+              温度
+              <Input
+                id="temperature"
                 type="number"
                 step={0.1}
                 min={0}
@@ -685,18 +740,20 @@ export default function App() {
                 onChange={(e) => setTemperature(Number(e.target.value))}
               />
             </label>
-            <label className="checkbox">
-              <input
-                type="checkbox"
+            <div className="checkbox">
+              <Checkbox
+                id="chat-template"
                 checked={useChatTemplate}
-                onChange={(e) => setUseChatTemplate(e.target.checked)}
+                onCheckedChange={(checked) =>
+                  setUseChatTemplate(checked === true)
+                }
               />
-              Gemma chat template
-            </label>
+              <label htmlFor="chat-template">Gemma向けの会話形式を使う</label>
+            </div>
           </div>
 
           <div className="actions">
-            <button
+            <Button
               type="button"
               className="primary"
               disabled={
@@ -707,10 +764,11 @@ export default function App() {
               }
               onClick={() => handleGenerate(false)}
             >
-              {isGenerating && !isStreaming ? "生成中…" : "生成 (一括)"}
-            </button>
-            <button
+              {isGenerating && !isStreaming ? "生成中…" : "テキストを生成"}
+            </Button>
+            <Button
               type="button"
+              variant="secondary"
               className="primary outline"
               disabled={
                 isGenerating ||
@@ -722,16 +780,8 @@ export default function App() {
             >
               {isGenerating && isStreaming
                 ? "ストリーミング中…"
-                : "生成 (ストリーム)"}
-            </button>
-            <button
-              type="button"
-              className="small"
-              disabled={benchRunning || isGenerating || !listenersReady}
-              onClick={handleBench}
-            >
-              {benchRunning ? "計測中…" : "ベンチ実行"}
-            </button>
+                : "ストリーム生成"}
+            </Button>
           </div>
 
           {error && <div className="error">{error}</div>}
@@ -779,44 +829,81 @@ export default function App() {
         </div>
       </section>
 
-      {bench && (
-        <section className="card bench">
-          <div className="card-title">
-            Benchmark — {bench.iterations} iterations
+      <section className="card bench page-section benchmark-page">
+        <div className="card-title">
+          <span>ベンチマーク</span>
+          {bench && <span className="muted">{bench.iterations}回計測</span>}
+        </div>
+        <p className="muted">
+          固定プロンプトと設定で3回測定します。生成画面の入力値は使いません。
+        </p>
+        <Button
+          type="button"
+          variant="default"
+          className="primary"
+          disabled={benchRunning || isGenerating || !listenersReady}
+          onClick={handleBench}
+        >
+          {benchRunning ? "計測中…" : "3回計測する"}
+        </Button>
+        {error && (
+          <div className="error" role="alert">
+            {error}
           </div>
-          <div className="bench-grid">
-            <div>
-              <strong>Model</strong> {bench.model_id}{" "}
-              {bench.is_mock && "(mock)"}
+        )}
+        {!bench && <p className="muted">計測結果はここに表示されます。</p>}
+        {bench && (
+          <>
+            <div className="bench-grid">
+              <div>
+                <strong>モデル</strong> {bench.model_id}{" "}
+                {bench.is_mock && "(mock)"}
+              </div>
+              <div>
+                <strong>プラットフォーム</strong> {bench.platform}/{bench.arch}
+              </div>
+              <div>
+                <strong>実行プロバイダー</strong> {bench.execution_provider}
+              </div>
+              <div>
+                <strong>平均レイテンシ</strong>{" "}
+                {bench.avg_latency_ms.toFixed(1)} ms
+              </div>
+              <div>
+                <strong>平均速度</strong> {bench.avg_tokens_per_sec.toFixed(1)}{" "}
+                tok/s
+              </div>
+              <div>
+                <strong>生成トークン数</strong> {bench.total_tokens}
+              </div>
+              <div>
+                <strong>計測日時</strong> <code>{bench.timestamp}</code>
+              </div>
             </div>
-            <div>
-              <strong>Platform</strong> {bench.platform}/{bench.arch}
+            <div className="hint">
+              合格目安: Desktop 5 tok/s / Mobile 2 tok/s (INT4)。
+              <code>bun run bench</code> でも計測可。
             </div>
-            <div>
-              <strong>EP</strong> {bench.execution_provider}
-            </div>
-            <div>
-              <strong>Avg latency</strong> {bench.avg_latency_ms.toFixed(1)} ms
-            </div>
-            <div>
-              <strong>Avg tok/s</strong> {bench.avg_tokens_per_sec.toFixed(1)}
-            </div>
-            <div>
-              <strong>Total tokens</strong> {bench.total_tokens}
-            </div>
-            <div>
-              <strong>Timestamp</strong> <code>{bench.timestamp}</code>
-            </div>
-          </div>
-          <div className="hint">
-            合格目安: Desktop 5 tok/s / Mobile 2 tok/s (INT4)。
-            <code>bun run bench</code> でも計測可。
-          </div>
-        </section>
-      )}
+          </>
+        )}
+      </section>
 
-      <section className="card howto">
-        <div className="card-title">検証手順 (Bun)</div>
+      <section className="card howto page-section info-page">
+        <div className="card-title">セットアップと表示設定</div>
+        <label className="theme-setting">
+          <span>
+            <Sun aria-hidden="true" size={18} /> テーマ
+          </span>
+          <select
+            aria-label="テーマ"
+            value={themeMode}
+            onChange={(event) => setThemeMode(event.target.value as ThemeMode)}
+          >
+            <option value="system">システム設定に合わせる</option>
+            <option value="light">ライト</option>
+            <option value="dark">ダーク</option>
+          </select>
+        </label>
         <ol>
           <li>
             <code>bun install</code> — 依存取得
@@ -843,7 +930,7 @@ export default function App() {
         </ol>
       </section>
 
-      <footer className="footer muted">
+      <footer className="footer muted info-page">
         gemma-on-device · Rust ort 2.0 · Tauri 2 · React 19 · Bun 1.3
         <span aria-hidden="true"> · </span>
         <button
