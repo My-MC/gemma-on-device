@@ -539,7 +539,7 @@ export default function App() {
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2 max-[760px]:max-w-[52%] max-[760px]:gap-1.5 max-[480px]:max-w-none max-[480px]:justify-start">
           <div
-            className="inline-flex min-h-10 items-center gap-2 rounded-full bg-secondary px-3.5 py-2 text-[0.8125rem] text-secondary-foreground max-[760px]:min-h-9 max-[760px]:gap-1.5 max-[760px]:px-2.5 max-[760px]:py-1.5 max-[760px]:text-xs max-[480px]:flex-wrap"
+            className="inline-flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-secondary px-3.5 text-[0.8125rem] text-secondary-foreground max-[760px]:h-9 max-[760px]:gap-1.5 max-[760px]:px-2.5 max-[760px]:text-xs"
             role="status"
             aria-live="polite"
           >
@@ -558,13 +558,13 @@ export default function App() {
             </strong>
           </div>
           {system && (
-            <span className="inline-flex min-h-7 items-center justify-center rounded-full bg-muted px-3 py-1 text-xs leading-tight font-semibold text-foreground max-[760px]:min-h-[26px] max-[760px]:px-[9px] max-[760px]:text-[0.6875rem]">
+            <span className="inline-flex h-10 shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-muted px-3.5 text-[0.8125rem] leading-tight font-semibold text-foreground max-[760px]:h-9 max-[760px]:px-2.5 max-[760px]:text-xs">
               {system.platform}/{system.arch}
             </span>
           )}
           {primaryModel && (
             <span
-              className={`inline-flex min-h-7 items-center justify-center rounded-full px-3 py-1 text-xs leading-tight font-semibold max-[760px]:min-h-[26px] max-[760px]:px-[9px] max-[760px]:text-[0.6875rem] ${primaryModel.exists ? "bg-status-success text-success" : "bg-status-warning text-warning"}`}
+              className={`inline-flex h-10 shrink-0 items-center justify-center whitespace-nowrap rounded-full px-3.5 text-[0.8125rem] leading-tight font-semibold max-[760px]:h-9 max-[760px]:px-2.5 max-[760px]:text-xs ${primaryModel.exists ? "bg-status-success text-success" : "bg-status-warning text-warning"}`}
             >
               {primaryModel.exists
                 ? "モデル準備完了"
