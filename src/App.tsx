@@ -79,16 +79,28 @@ const MODEL_VARIANTS = [
   { value: "3n-e2b-int4", label: "3n E2B INT4 (モバイル最適化, 実験的)" },
 ] as const;
 
-function ModelVariantSelect({
+const THEME_OPTIONS = [
+  { value: "system", label: "システム設定に合わせる" },
+  { value: "light", label: "ライト" },
+  { value: "dark", label: "ダーク" },
+] as const;
+
+type SelectOption = { value: string; label: string };
+
+function AppSelect({
   value,
   onChange,
-  disabled,
+  disabled = false,
   labelId,
+  options,
+  className = "",
 }: {
   value: string;
   onChange: (value: string) => void;
-  disabled: boolean;
+  disabled?: boolean;
   labelId: string;
+  options: readonly SelectOption[];
+  className?: string;
 }) {
   const id = useId();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -96,11 +108,11 @@ function ModelVariantSelect({
   const listboxRef = useRef<HTMLDivElement>(null);
   const selectedIndex = Math.max(
     0,
-    MODEL_VARIANTS.findIndex((option) => option.value === value),
+    options.findIndex((option) => option.value === value),
   );
   const [activeIndex, setActiveIndex] = useState(selectedIndex);
   const [open, setOpen] = useState(false);
-  const selectedOption = MODEL_VARIANTS[selectedIndex];
+  const selectedOption = options[selectedIndex];
 
   useEffect(() => {
     if (!open) return;
@@ -131,7 +143,7 @@ function ModelVariantSelect({
   };
 
   const chooseOption = (index: number) => {
-    const option = MODEL_VARIANTS[index];
+    const option = options[index];
     if (!option) return;
     onChange(option.value);
     closeMenu(true);
@@ -141,9 +153,7 @@ function ModelVariantSelect({
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
-        setActiveIndex((index) =>
-          Math.min(index + 1, MODEL_VARIANTS.length - 1),
-        );
+        setActiveIndex((index) => Math.min(index + 1, options.length - 1));
         break;
       case "ArrowUp":
         event.preventDefault();
@@ -155,7 +165,7 @@ function ModelVariantSelect({
         break;
       case "End":
         event.preventDefault();
-        setActiveIndex(MODEL_VARIANTS.length - 1);
+        setActiveIndex(options.length - 1);
         break;
       case "Enter":
       case " ":
@@ -173,7 +183,7 @@ function ModelVariantSelect({
   };
 
   return (
-    <div className="model-variant-select" ref={rootRef}>
+    <div className={`model-variant-select ${className}`} ref={rootRef}>
       <button
         ref={triggerRef}
         type="button"
@@ -205,7 +215,7 @@ function ModelVariantSelect({
           aria-activedescendant={`${id}-option-${activeIndex}`}
           onKeyDown={handleListboxKeyDown}
         >
-          {MODEL_VARIANTS.map((option, index) => (
+          {options.map((option, index) => (
             <div
               id={`${id}-option-${index}`}
               key={option.value}
@@ -623,11 +633,12 @@ export default function App() {
           <div className="download-controls">
             <div className="download-variant-field">
               <span id="download-variant-label">モデル</span>
-              <ModelVariantSelect
+              <AppSelect
                 value={variant}
                 onChange={setVariant}
                 disabled={downloading}
                 labelId="download-variant-label"
+                options={MODEL_VARIANTS}
               />
             </div>
             <Button
@@ -890,20 +901,18 @@ export default function App() {
 
       <section className="card howto page-section info-page">
         <div className="card-title">セットアップと表示設定</div>
-        <label className="theme-setting">
-          <span>
+        <div className="theme-setting">
+          <span id="theme-setting-label">
             <Sun aria-hidden="true" size={18} /> テーマ
           </span>
-          <select
-            aria-label="テーマ"
+          <AppSelect
+            className="theme-select"
             value={themeMode}
-            onChange={(event) => setThemeMode(event.target.value as ThemeMode)}
-          >
-            <option value="system">システム設定に合わせる</option>
-            <option value="light">ライト</option>
-            <option value="dark">ダーク</option>
-          </select>
-        </label>
+            onChange={(value) => setThemeMode(value as ThemeMode)}
+            labelId="theme-setting-label"
+            options={THEME_OPTIONS}
+          />
+        </div>
         <ol>
           <li>
             <code>bun install</code> — 依存取得

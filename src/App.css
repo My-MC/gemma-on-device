@@ -312,8 +312,7 @@
 }
 textarea,
 input[type="number"],
-input[type="text"],
-select {
+input[type="text"] {
   border: 1px solid var(--border-input);
   border-radius: 8px;
   padding: 10px 12px;
@@ -322,8 +321,7 @@ select {
   background: var(--input-bg);
   color: inherit;
 }
-input,
-option {
+input {
   font-family: inherit;
 }
 textarea {
@@ -588,7 +586,6 @@ button:disabled {
 .form textarea,
 .form input,
 .download-variant-select,
-.theme-setting select,
 .benchmark-prompt textarea {
   min-height: 48px;
   color: var(--foreground);
@@ -676,8 +673,8 @@ button.small:focus-visible {
   gap: 8px;
 }
 
-.theme-setting select {
-  padding: 0 12px;
+.theme-select {
+  width: 100%;
 }
 
 @media (min-width: 840px) {
@@ -802,7 +799,7 @@ button.small:focus-visible {
   width: 100%;
   min-width: 0;
   text-align: left;
-  font-family: inherit;
+  font-family: var(--font-sans);
   font-size: 0.9rem;
   font-weight: 400;
   background: var(--input-bg);
@@ -839,13 +836,14 @@ button.small:focus-visible {
   border-radius: 8px;
   background: var(--surface);
   color: var(--text);
+  font-family: var(--font-sans);
   box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
   outline: none;
 }
 .model-variant-option {
   padding: 8px 10px;
   border-radius: 5px;
-  font-family: inherit;
+  font-family: var(--font-sans);
   font-size: 0.9rem;
   font-weight: 400;
   line-height: 1.4;
