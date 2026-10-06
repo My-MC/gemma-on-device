@@ -1,16 +1,21 @@
-import { env, pipeline, TextStreamer } from "@huggingface/transformers";
+import { env, ModelRegistry, pipeline, TextStreamer } from "@huggingface/transformers";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
+
+export const MODEL_DTYPES = ["fp32", "fp16", "q8", "int8", "uint8", "q4", "bnb4", "q4f16", "q2", "q2f16", "q1", "q1f16"] as const;
+export type ModelDType = (typeof MODEL_DTYPES)[number];
 
 export type LocalModel = {
   id: string;
   repo: string;
   revision: string;
-  dtype: "q4" | "q2f16";
+  dtype: ModelDType;
   name: string;
   size: string;
   description: string;
   vision?: boolean;
+  custom?: boolean;
+  sha256?: Record<string, string>;
 };
 
 export const LOCAL_MODELS: LocalModel[] = [
@@ -56,6 +61,102 @@ export const LOCAL_MODELS: LocalModel[] = [
 type TextGenerator = Awaited<ReturnType<typeof pipeline<"text-generation">>>;
 
 const generators = new Map<string, Promise<TextGenerator>>();
+const customModelHashes = new Map<string, Record<string, string>>();
+
+function customModelKey(repo: string, revision: string) {
+  return `${repo}@${revision}`;
+}
+
+function isIntegrityProtectedFile(file: string) {
+  return /\.onnx(?:_data(?:_\d+)*)?$/i.test(file) || /(^|\/)tokenizer\.json$/i.test(file);
+}
+
+function normalizeModelRepo(value: string): string {
+  let candidate = value.trim();
+  if (/^https:\/\//i.test(candidate)) {
+    const url = new URL(candidate);
+    if (url.hostname !== "huggingface.co") throw new Error("Hugging FaceのモデルURLまたは owner/repo を入力してください。");
+    candidate = url.pathname.split("/").filter(Boolean).slice(0, 2).join("/");
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/.test(candidate)) {
+    throw new Error("owner/repo 形式のHugging FaceモデルIDを入力してください。");
+  }
+  return candidate;
+}
+
+type HuggingFaceModelInfo = {
+  sha?: string;
+  private?: boolean;
+  gated?: boolean | string;
+  siblings?: Array<{
+    rfilename?: string;
+    size?: number;
+    lfs?: { sha256?: string };
+  }>;
+};
+
+export async function discoverHuggingFaceModels(value: string): Promise<LocalModel[]> {
+  const repo = normalizeModelRepo(value);
+  const response = await fetch(`https://huggingface.co/api/models/${repo}?blobs=true`);
+  if (!response.ok) {
+    throw new Error(response.status === 401 || response.status === 404
+      ? "公開モデルが見つかりません。非公開・承認制モデルには対応していません。"
+      : `Hugging Face API error (${response.status})`);
+  }
+
+  const info = await response.json() as HuggingFaceModelInfo;
+  if (info.private || info.gated) throw new Error("公開モデルのみ追加できます。非公開・承認制モデルには対応していません。");
+  if (!info.sha || !/^[a-f0-9]{40}$/i.test(info.sha) || !Array.isArray(info.siblings)) {
+    throw new Error("Hugging Faceからモデルのrevision情報を取得できませんでした。");
+  }
+
+  const revision = info.sha;
+  const siblings = new Map(info.siblings.flatMap((file) => file.rfilename ? [[file.rfilename, file] as const] : []));
+  const hashes: Record<string, string> = {};
+  for (const [path, file] of siblings) {
+    const digest = file.lfs?.sha256;
+    if (isIntegrityProtectedFile(path) && digest && /^[a-f0-9]{64}$/i.test(digest)) hashes[path] = digest.toLowerCase();
+  }
+  customModelHashes.set(customModelKey(repo, revision), hashes);
+
+  const availableDtypes = await ModelRegistry.get_available_dtypes(repo, { revision });
+  const supportedDtypes = availableDtypes.filter((dtype): dtype is ModelDType =>
+    MODEL_DTYPES.some((supported) => supported === dtype),
+  );
+  const models: LocalModel[] = [];
+  for (const dtype of supportedDtypes) {
+    const pipelineOptions = { revision, dtype };
+    const files = await ModelRegistry.get_pipeline_files(
+      "text-generation",
+      repo,
+      pipelineOptions as Parameters<typeof ModelRegistry.get_pipeline_files>[2],
+    );
+    const protectedFiles = files.filter(isIntegrityProtectedFile);
+    const missingHashes = protectedFiles.filter((file) => !hashes[file]);
+    if (missingHashes.length || !protectedFiles.some((file) => /(^|\/)tokenizer\.json$/i.test(file))) continue;
+
+    models.push({
+      id: `hf:${repo}@${revision}:${dtype}`,
+      repo,
+      revision,
+      dtype,
+      name: repo,
+      size: "Hugging Face",
+      description: `公開ONNXモデル · ${dtype.toUpperCase()} · text-generation`,
+      custom: true,
+      sha256: hashes,
+    });
+  }
+
+  if (!models.length) {
+    customModelHashes.delete(customModelKey(repo, revision));
+    throw new Error("Transformers.js対応のテキスト生成ONNXと、SHA256を取得できるONNX重み・tokenizer.jsonが見つかりません。");
+  }
+
+  const preference: ModelDType[] = ["q4", "q4f16", "q2f16", "q2", "q1", "q8", "int8", "fp16", "fp32", "uint8", "bnb4", "q1f16"];
+  models.sort((a, b) => preference.indexOf(a.dtype) - preference.indexOf(b.dtype));
+  return models;
+}
 
 const MODEL_SHA256: Record<string, Record<string, string>> = {
   "onnx-community/gemma-4-E2B-it-qat-mobile-ONNX": {
@@ -104,7 +205,7 @@ const MODEL_SHA256: Record<string, Record<string, string>> = {
   },
 };
 
-function modelAsset(url: string): { cacheKey: string; expected: string } | undefined {
+function modelAsset(url: string, enforceIntegrity = true): { cacheKey: string; expected: string } | undefined {
   let pathname: string;
   try {
     pathname = new URL(url).pathname;
@@ -115,11 +216,19 @@ function modelAsset(url: string): { cacheKey: string; expected: string } | undef
   const resolve = path.indexOf("resolve");
   if (resolve < 2) return;
   const repo = path.slice(0, resolve).join("/");
+  const revision = path[resolve + 1];
   const files = MODEL_SHA256[repo];
-  if (!files) return;
+  const customFiles = customModelHashes.get(customModelKey(repo, revision));
+  const expectedFiles = files ?? customFiles;
+  if (!expectedFiles) return;
   const file = path.slice(resolve + 2).join("/");
-  const expected = files[file];
-  if (!expected) throw new Error(`No SHA256 is registered for ${repo}/${file}`);
+  const expected = expectedFiles[file];
+  if (!expected) {
+    if (enforceIntegrity && (files || isIntegrityProtectedFile(file))) {
+      throw new Error(`No SHA256 is registered for ${repo}/${file}`);
+    }
+    return;
+  }
   return { cacheKey: url, expected };
 }
 
@@ -161,12 +270,12 @@ if (responseCache) {
       const cache = await responseCache;
       const response = await cache.match(key);
       if (!response) return undefined;
-      const asset = modelAsset(key);
+      const asset = modelAsset(key, response.status === 200);
       return asset ? verifyResponse(response, asset.expected, () => void cache.delete(key)) : response;
     },
     async put(key: string, response: Response) {
       const cache = await responseCache;
-      const asset = modelAsset(key);
+      const asset = modelAsset(key, response.status === 200);
       await cache.put(key, asset ? verifyResponse(response, asset.expected) : response);
     },
     async delete(key: string) {
@@ -178,7 +287,7 @@ if (responseCache) {
 const originalFetch = env.fetch.bind(env);
 env.fetch = async (input, init) => {
   const response = await originalFetch(input, init);
-  const asset = modelAsset(String(input));
+  const asset = modelAsset(String(input), response.status === 200);
   return asset && response.status === 200 ? verifyResponse(response, asset.expected) : response;
 };
 
@@ -186,6 +295,9 @@ export function loadLocalModel(
   model: LocalModel,
   onProgress?: (message: string) => void,
 ): Promise<TextGenerator> {
+  if (model.custom && model.sha256) {
+    customModelHashes.set(customModelKey(model.repo, model.revision), model.sha256);
+  }
   const existing = generators.get(model.id);
   if (existing) return existing;
 
