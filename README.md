@@ -57,6 +57,10 @@ Dependency manifests and lockfiles are the version sources; Bun 1.3.14 is the ve
 - Desktop debug builds: existing project `models/` resolved by `resolve_model_dir()` is preferred.
 - Desktop release / Mobile: `app.path().app_data_dir().join("models")` via `src-tauri/src/lib.rs:resolve_model_dir_for_app()`. If app-data resolution fails, it falls back to `resolve_model_dir()`. Model binaries are ignored; see `models/README.md`.
 
+## UI Design
+
+The UI follows Material 3-inspired color roles, typography, spacing, layout, and responsive behavior. See [UI design guidelines](docs/ui-design-guidelines.md) for the component rules, Tailwind conventions, and visual verification checklist.
+
 ## Project Structure
 
 ```
@@ -67,9 +71,10 @@ Dependency manifests and lockfiles are the version sources; Bun 1.3.14 is the ve
 ├── index.html
 ├── src/
 │   ├── App.tsx               # In-app download, model matrix, inference, bench, system
-│   ├── App.css               # download-panel / progress-bar
 │   ├── main.tsx
 │   └── assets/
+├── docs/
+│   └── ui-design-guidelines.md # Material 3-inspired UI and Tailwind conventions
 ├── src-tauri/
 │   ├── Cargo.toml            # gemma-on-device, ort, tokenizers, reqwest, tokio
 │   ├── tauri.conf.json       # productName, identifier, build.beforeDevCommand: bun run dev
