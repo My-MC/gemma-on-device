@@ -30,6 +30,15 @@ const LicenseDialog = lazy(() =>
 const inlineCodeClassName =
   "rounded-md bg-surface-container-high px-1.5 py-0.5 text-[0.82em] text-foreground [font-family:ui-monospace,'Noto_Sans_JP_Variable',monospace]";
 
+const pageHeaderClassName =
+  "ml-[max(120px,calc((100%-1240px)/2+120px))] flex w-[min(1120px,calc(100%-120px))] min-w-0 items-center justify-between gap-6 py-2 pb-4 max-[1000px]:ml-0 max-[1000px]:w-full max-[760px]:items-start max-[760px]:gap-4 max-[760px]:py-2 max-[760px]:pb-3 max-[480px]:flex-col max-[480px]:gap-3";
+
+const pageCardClassName =
+  "ml-[max(120px,calc((100%-1240px)/2+120px))] flex w-[min(1120px,calc(100%-120px))] min-w-0 flex-col gap-6 rounded-[28px] border border-outline-variant bg-card p-[clamp(24px,3vw,32px)] text-card-foreground max-[1000px]:ml-0 max-[1000px]:w-full max-[760px]:gap-5 max-[760px]:rounded-3xl max-[760px]:px-5 max-[760px]:py-6 max-[480px]:px-4";
+
+const pageFooterClassName =
+  "ml-[max(120px,calc((100%-1240px)/2+120px))] w-[min(1120px,calc(100%-120px))] py-2 text-center text-xs leading-6 text-muted-foreground max-[1000px]:ml-0 max-[1000px]:w-full";
+
 type ModelInfo = {
   model_id: string;
   onnx_path: string;
@@ -207,7 +216,7 @@ function AppSelect({
           id={`${id}-selected`}
           className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
         >
-          {selectedOption.label}
+          {selectedOption?.label ?? ""}
         </span>
         <span
           className="h-[9px] w-[9px] shrink-0 translate-y-[-2px] rotate-45 border-r-[1.5px] border-b-[1.5px] border-current transition-transform group-aria-expanded:translate-y-[2px] group-aria-expanded:rotate-[225deg]"
@@ -528,7 +537,7 @@ export default function App() {
 
   return (
     <main className="[--viewport-height:100vh] mx-auto flex min-h-screen w-full max-w-[1600px] flex-col items-start gap-6 px-8 pt-6 pb-12 text-foreground max-[1000px]:gap-2 max-[1000px]:px-6 max-[1000px]:pt-5 max-[1000px]:pb-10 max-[760px]:items-stretch max-[760px]:gap-1 max-[760px]:px-4 max-[760px]:pt-4 max-[760px]:pb-[calc(112px+env(safe-area-inset-bottom))] max-[480px]:px-3 supports-[height:100dvh]:[--viewport-height:100dvh] supports-[height:100dvh]:[min-height:100dvh] short-mobile:pb-6 motion-reduce:[&_*]:[animation-duration:0.01ms] motion-reduce:[&_*]:[transition-duration:0.01ms] motion-reduce:[&_*]:[scroll-behavior:auto]">
-      <header className="ml-[max(120px,calc((100%-1240px)/2+120px))] flex w-[min(1120px,calc(100%-120px))] min-w-0 items-center justify-between gap-6 py-2 pb-4 max-[1000px]:ml-0 max-[1000px]:w-full max-[760px]:items-start max-[760px]:gap-4 max-[760px]:py-2 max-[760px]:pb-3 max-[480px]:flex-col max-[480px]:gap-3">
+      <header className={pageHeaderClassName}>
         <div className="min-w-0">
           <h1 className="m-0 text-xl leading-[1.35] font-semibold tracking-[-0.02em] text-foreground max-[760px]:text-lg">
             Gemma On Device
@@ -598,7 +607,7 @@ export default function App() {
 
       {system && (
         <section
-          className={`${activePage === "info" ? "" : "hidden"} ml-[max(120px,calc((100%-1240px)/2+120px))] flex w-[min(1120px,calc(100%-120px))] min-w-0 flex-col gap-6 rounded-[28px] border border-outline-variant bg-card p-[clamp(24px,3vw,32px)] text-card-foreground max-[1000px]:ml-0 max-[1000px]:w-full max-[760px]:gap-5 max-[760px]:rounded-3xl max-[760px]:px-5 max-[760px]:py-6 max-[480px]:px-4`}
+          className={`${activePage === "info" ? "" : "hidden"} ${pageCardClassName}`}
         >
           <div className="flex items-center gap-3 text-xl leading-[1.4] font-semibold text-foreground max-[760px]:text-lg">
             このデバイス
@@ -635,7 +644,7 @@ export default function App() {
       )}
 
       <section
-        className={`${activePage === "models" ? "" : "hidden"} ml-[max(120px,calc((100%-1240px)/2+120px))] flex w-[min(1120px,calc(100%-120px))] min-w-0 flex-col gap-6 rounded-[28px] border border-outline-variant bg-card p-[clamp(24px,3vw,32px)] text-card-foreground max-[1000px]:ml-0 max-[1000px]:w-full max-[760px]:gap-5 max-[760px]:rounded-3xl max-[760px]:px-5 max-[760px]:py-6 max-[480px]:px-4`}
+        className={`${activePage === "models" ? "" : "hidden"} ${pageCardClassName}`}
       >
         <div className="flex items-center justify-between gap-3 text-xl leading-[1.4] font-semibold text-foreground max-[760px]:text-lg max-[480px]:items-start">
           <span>モデル管理</span>
@@ -787,7 +796,7 @@ export default function App() {
       </section>
 
       <section
-        className={`${activePage === "generate" ? "" : "hidden"} ml-[max(120px,calc((100%-1240px)/2+120px))] flex w-[min(1120px,calc(100%-120px))] min-w-0 flex-col gap-6 rounded-[28px] border border-outline-variant bg-card p-[clamp(24px,3vw,32px)] text-card-foreground max-[1000px]:ml-0 max-[1000px]:w-full max-[760px]:gap-5 max-[760px]:rounded-3xl max-[760px]:px-5 max-[760px]:py-6 max-[480px]:px-4`}
+        className={`${activePage === "generate" ? "" : "hidden"} ${pageCardClassName}`}
       >
         <div className="flex items-center gap-3 text-xl leading-[1.4] font-semibold text-foreground max-[760px]:text-lg">
           テキスト生成
@@ -944,7 +953,7 @@ export default function App() {
       </section>
 
       <section
-        className={`${activePage === "benchmark" ? "" : "hidden"} ml-[max(120px,calc((100%-1240px)/2+120px))] flex w-[min(1120px,calc(100%-120px))] min-w-0 flex-col gap-6 rounded-[28px] border border-outline-variant bg-card p-[clamp(24px,3vw,32px)] text-card-foreground max-[1000px]:ml-0 max-[1000px]:w-full max-[760px]:gap-5 max-[760px]:rounded-3xl max-[760px]:px-5 max-[760px]:py-6 max-[480px]:px-4`}
+        className={`${activePage === "benchmark" ? "" : "hidden"} ${pageCardClassName}`}
       >
         <div className="flex items-center gap-3 text-xl leading-[1.4] font-semibold text-foreground max-[760px]:text-lg">
           <span>ベンチマーク</span>
@@ -1037,7 +1046,7 @@ export default function App() {
       </section>
 
       <section
-        className={`${activePage === "info" ? "" : "hidden"} ml-[max(120px,calc((100%-1240px)/2+120px))] flex w-[min(1120px,calc(100%-120px))] min-w-0 flex-col gap-6 rounded-[28px] border border-outline-variant bg-card p-[clamp(24px,3vw,32px)] text-card-foreground max-[1000px]:ml-0 max-[1000px]:w-full max-[760px]:gap-5 max-[760px]:rounded-3xl max-[760px]:px-5 max-[760px]:py-6 max-[480px]:px-4`}
+        className={`${activePage === "info" ? "" : "hidden"} ${pageCardClassName}`}
       >
         <div className="flex items-center gap-3 text-xl leading-[1.4] font-semibold text-foreground max-[760px]:text-lg">
           セットアップと表示設定
@@ -1091,7 +1100,7 @@ export default function App() {
       </section>
 
       <footer
-        className={`${activePage === "info" ? "" : "hidden"} ml-[max(120px,calc((100%-1240px)/2+120px))] w-[min(1120px,calc(100%-120px))] py-2 text-center text-xs leading-6 text-muted-foreground max-[1000px]:ml-0 max-[1000px]:w-full`}
+        className={`${activePage === "info" ? "" : "hidden"} ${pageFooterClassName}`}
       >
         gemma-on-device · Rust ort 2.0 · Tauri 2 · React 19 · Bun 1.3
         <span aria-hidden="true"> · </span>
