@@ -208,7 +208,12 @@ const proc = Bun.spawn(
     "--features",
     cargoFeature,
   ],
-  { cwd: repo, env: process.env, stdout: "inherit", stderr: "inherit" },
+  {
+    cwd: repo,
+    env: { ...process.env, GEMMA_RUNTIME_EDITION: edition },
+    stdout: "inherit",
+    stderr: "inherit",
+  },
 );
 process.exitCode = await proc.exited;
 if (process.exitCode === 0) {

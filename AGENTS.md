@@ -22,7 +22,8 @@ Use `package.json`, `src-tauri/Cargo.toml`, and the lockfiles as the version sou
 - `src/` — React (Bun + Vite), `src/App.tsx` is the main screen for download/inference/bench
 - `src-tauri/` — Rust, `src/lib.rs` hosts Tauri commands + `setup` (app_data_dir), `src/inference/{session,tokenizer,generate,bench,download}.rs`
 - `models/` — model binaries are ignored; see `models/README.md`. Real inference uses `gemma-3-1b-it-int4.onnx` + `model_q4.onnx_data` + the 1B `tokenizer.json`. Missing graph/tokenizer triggers `generate.rs:mock_generate`; errors on the real path are returned to the caller. INT8 and 3n downloads do not select a different inference model.
-- `scripts/` — model download/export, mock CLI bench, environment checks, Windows DLL staging, and the worktree dev helper.
+- `scripts/` — model download/export, mock CLI bench, environment checks, Windows DLL/runtime staging, edition builds, and license generation.
+- `scripts/generate_licenses.ts` generates the target- and edition-specific report in ignored `src/generated/licenses.json`, shown by the footer license viewer.
 - `Cargo.toml` (workspace root) is `members = ["src-tauri"]`, `resolver = "2"` only
 
 ## Development Commands
@@ -45,6 +46,7 @@ bun run tauri build        # bundle
 bun run download:model     # 1b-int4 (onnx-community)
 bun run bench              # CLI bench
 bun run check:ort          # environment diagnostics
+bun run licenses:generate # refresh host/selected target dependency licenses
 cargo check --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
@@ -92,8 +94,10 @@ Agents may work in a Git worktree. Each worktree is an isolated working director
 - **SHA256**: Verify every model file (`*.onnx`, `*.onnx_data`, `tokenizer.json`) after download and before loading. Keep `models/README.md`, Rust `variant_specs`, and Bun `SHA256` in sync. Downloaders verify hashes, but the current inference path does not re-verify them before `Session::commit_from_file`. Manually verify files copied or changed outside the downloader. Status commands currently check graph/tokenizer existence only, not hashes or external data readiness.
 - **Tokenizers**: Downloading 3n replaces `tokenizer.json` with a different hash. Restore the 1B tokenizer with `bun run download:model:1b` before 1B inference; restart an app that already cached a session after replacing model files.
 - **3n download limitation**: The Rust downloader treats failed 3n `.onnx_data` downloads as optional and can emit `download-complete` for a partial download. The Bun downloader fails instead. Neither completion nor status proves 3n inference readiness.
-- **Runtime resources**: Windows builds stage `target/release/onnxruntime.dll` via `scripts/download_ort_dll.ts` and `tauri.windows.conf.json`. Default `beforeBuildCommand` runs DLL staging (a no-op outside Windows) and the frontend build. Linux/macOS builds use the linked runtime and have no DLL bundle resource.
+- **Runtime resources**: Windows builds stage `target/release/onnxruntime.dll` via `scripts/download_ort_dll.ts`. GPU editions stage pinned native runtimes under `runtime-artifacts/` and bundle them through `tauri.gpu.conf.json`.
 - **GPU runtime loading**: GPU editions bundle a dynamic runtime. CUDA bundles must place `onnxruntime_providers_shared.dll` / `libonnxruntime_providers_shared.so` beside the core and CUDA provider. Linux dependency preloading must exclude all `libonnxruntime*` libraries: loading providers before ORT initializes its host can crash the process. Preload dependencies from the selected core's parent directory.
+- **Licenses**: The frontend viewer reads generated offline license data. The generator uses the active Tauri target and runtime edition, excludes JavaScript dev dependencies and Rust build/dev dependencies, includes staged GPU runtime license/notice files and feature-selected Rust dependencies, and stops if a package has no license identifier or text.
+- Set `GEMMA_CARGO_FEATURES` to any extra Cargo features passed to a plain Tauri build so its dependency license report matches that build.
 
 ## Context7 / Context-Mode (Mandatory)
 

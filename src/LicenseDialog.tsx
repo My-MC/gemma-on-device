@@ -1,0 +1,217 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import licenseDataUrl from "./generated/licenses.json?url";
+import "./LicenseDialog.css";
+
+type LicenseFile = { name: string; textId: number };
+type LicensePackage = {
+  name: string;
+  version: string;
+  ecosystem: "JavaScript" | "Rust" | "Runtime" | "Model";
+  license: string;
+  repository?: string;
+  licenseUrl?: string;
+  files: LicenseFile[];
+};
+
+type LicenseReport = {
+  target: string;
+  edition: string;
+  packages: LicensePackage[];
+  texts: { name: string; text: string }[];
+};
+
+const ecosystems = [
+  "すべて",
+  "JavaScript",
+  "Rust",
+  "Runtime",
+  "Model",
+] as const;
+
+export function LicenseDialog({ onClose }: { onClose: () => void }) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [report, setReport] = useState<LicenseReport | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [ecosystem, setEcosystem] =
+    useState<(typeof ecosystems)[number]>("すべて");
+  useEffect(() => {
+    fetch(licenseDataUrl)
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        setReport((await response.json()) as LicenseReport);
+      })
+      .catch((error: unknown) => setLoadError(String(error)));
+  }, []);
+  useEffect(() => {
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const dialog = dialogRef.current;
+    searchRef.current?.focus();
+    const focusable = () =>
+      dialog?.querySelectorAll<HTMLElement>(
+        "button, input, summary, a[href], [tabindex]:not([tabindex='-1'])",
+      ) ?? [];
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const elements = [...focusable()].filter(
+        (element) => !element.hasAttribute("disabled"),
+      );
+      if (!elements.length) return;
+      if (event.shiftKey && document.activeElement === elements[0]) {
+        event.preventDefault();
+        elements[elements.length - 1]?.focus();
+      } else if (
+        !event.shiftKey &&
+        document.activeElement === elements[elements.length - 1]
+      ) {
+        event.preventDefault();
+        elements[0].focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previouslyFocused?.focus();
+    };
+  }, [onClose]);
+  const filtered = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    return (report?.packages ?? []).filter((pkg) => {
+      const matchesEcosystem =
+        ecosystem === "すべて" || pkg.ecosystem === ecosystem;
+      const matchesQuery =
+        !normalizedQuery ||
+        `${pkg.name} ${pkg.version} ${pkg.license}`
+          .toLocaleLowerCase()
+          .includes(normalizedQuery);
+      return matchesEcosystem && matchesQuery;
+    });
+  }, [ecosystem, query, report]);
+
+  return (
+    <div className="license-backdrop">
+      <button
+        className="license-backdrop-dismiss"
+        type="button"
+        aria-label="ライセンス画面を閉じる"
+        onClick={onClose}
+      />
+      <section
+        className="license-dialog"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="license-dialog-title"
+      >
+        <header className="license-header">
+          <div>
+            <h2 id="license-dialog-title">ライブラリ・モデルのライセンス</h2>
+            <p>
+              {report
+                ? `${report.edition} · ${report.target} · ${report.packages.length} 件`
+                : "ライセンス情報を読み込んでいます"}
+            </p>
+          </div>
+          <button
+            className="small"
+            type="button"
+            onClick={onClose}
+            aria-label="ライセンス画面を閉じる"
+          >
+            閉じる
+          </button>
+        </header>
+        <div className="license-toolbar">
+          <label>
+            <span className="sr-only">ライブラリ・モデルを検索</span>
+            <input
+              ref={searchRef}
+              type="search"
+              placeholder="名前、バージョン、ライセンスで検索"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+          {/* Native GTK select popups cannot use the bundled Japanese webfont. */}
+          <fieldset className="license-ecosystems" aria-label="種別を絞り込む">
+            {ecosystems.map((item) => (
+              <button
+                key={item}
+                type="button"
+                aria-pressed={ecosystem === item}
+                onClick={() => setEcosystem(item)}
+              >
+                {item}
+              </button>
+            ))}
+          </fieldset>
+        </div>
+        <div className="license-list" aria-live="polite">
+          {loadError && (
+            <p className="license-empty" role="alert">
+              ライセンス情報を読み込めませんでした: {loadError}
+            </p>
+          )}
+          {!report && !loadError && (
+            <p className="license-empty" role="status">
+              ライセンス情報を読み込んでいます…
+            </p>
+          )}
+          {filtered.map((pkg) => (
+            <article
+              className="license-package"
+              key={`${pkg.ecosystem}:${pkg.name}@${pkg.version}`}
+            >
+              <details>
+                <summary>
+                  <span className="license-package-name">
+                    {pkg.name} {pkg.version && <small>v{pkg.version}</small>}
+                  </span>
+                  <span className="license-tags">
+                    <span className="badge">{pkg.ecosystem}</span>
+                    <span>{pkg.license}</span>
+                  </span>
+                </summary>
+                <div className="license-package-detail">
+                  {pkg.repository && (
+                    <p>
+                      <a href={pkg.repository} target="_blank" rel="noreferrer">
+                        ソースとライセンスの出典
+                      </a>
+                    </p>
+                  )}
+                  {pkg.licenseUrl && (
+                    <p>
+                      <a href={pkg.licenseUrl} target="_blank" rel="noreferrer">
+                        ライセンス全文（公式）
+                      </a>
+                    </p>
+                  )}
+                  {pkg.files.map((file) => (
+                    <section key={file.name}>
+                      <h3>{file.name}</h3>
+                      <pre>{report?.texts[file.textId]?.text}</pre>
+                    </section>
+                  ))}
+                </div>
+              </details>
+            </article>
+          ))}
+          {report && filtered.length === 0 && (
+            <p className="license-empty">
+              該当するライブラリまたはモデルはありません。
+            </p>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}

@@ -24,6 +24,14 @@ bun run tauri dev          # Desktop (see README for WSL flags)
 
 `package.json:scripts` call `vite` directly. Use `bun run dev` / `bun run build`. Do not use `bunx --bun vite`.
 
+## Dependency Licenses
+
+The application footer opens an offline list of production JavaScript and Rust dependencies and their license texts. The list is generated for the active target and Cargo features before `bun run dev` and `bun run build`; `bun run licenses:generate` refreshes it directly. Windows builds include license files extracted from the staged ONNX Runtime DLL. CUDA, MIGraphX, and CoreML editions include the license and notice files staged with their runtime artifacts. Rust dependencies enabled by each edition's Cargo features are included as well.
+
+Tauri supplies the active target triple automatically. If a Tauri build enables extra Cargo features, set `GEMMA_CARGO_FEATURES` to the same feature names (comma or space separated), so the report matches the build.
+
+Generation excludes JavaScript development dependencies and Rust build/dev dependencies. Rust license expressions come from Cargo metadata. License and notice files packaged by each crate are included; if no license text is packaged, canonical text for declared SPDX licenses is supplied from the locked `spdx-license-list` dependency. A missing or unrecognized license identifier or text stops generation so the dependency can be reviewed before distribution.
+
 On Windows, run `bun run download:ort-dll` before Cargo checks. Launch/build the desktop app with `bun run tauri dev -- --features load-dynamic` / `bun run tauri build -- --features load-dynamic`, matching the Windows bundle configuration in CI.
 
 ## Development Workflow (GitHub Flow, Mandatory)
