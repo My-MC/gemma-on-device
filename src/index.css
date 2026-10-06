@@ -66,6 +66,7 @@
   --accent-foreground: #182f4a;
   --destructive: #ba1a1a;
   --border: #c3c7cf;
+  --outline: #737780;
   --input: #737780;
   --ring: #315f91;
   --radius: 1rem;
@@ -119,6 +120,7 @@
   --accent-foreground: #d3e4ff;
   --destructive: #ffb4ab;
   --border: #42474f;
+  --outline: #8d919a;
   --input: #8d919a;
   --ring: #a1c9ff;
 

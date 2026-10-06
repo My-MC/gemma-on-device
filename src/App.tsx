@@ -523,20 +523,6 @@ export default function App() {
           <h1>Gemma On Device</h1>
           <span className="subtitle">オンデバイスでGemmaを実行・検証</span>
         </div>
-        <nav className="primary-nav" aria-label="メインメニュー">
-          {pages.map(({ id, label, Icon }) => (
-            <button
-              key={id}
-              type="button"
-              className="nav-item"
-              aria-current={activePage === id ? "page" : undefined}
-              onClick={() => setActivePage(id)}
-            >
-              <Icon aria-hidden="true" size={20} />
-              <span>{label}</span>
-            </button>
-          ))}
-        </nav>
         <div className="header-badges">
           <div className="runtime-status" role="status" aria-live="polite">
             <span className="runtime-label">
@@ -567,6 +553,23 @@ export default function App() {
           )}
         </div>
       </header>
+
+      <nav className="primary-nav" aria-label="メインメニュー">
+        {pages.map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            type="button"
+            className="nav-item"
+            aria-current={activePage === id ? "page" : undefined}
+            onClick={() => setActivePage(id)}
+          >
+            <span className="nav-icon">
+              <Icon aria-hidden="true" size={20} />
+            </span>
+            <span className="nav-label">{label}</span>
+          </button>
+        ))}
+      </nav>
 
       {system && (
         <section className="card system-card page-section info-page">
