@@ -1,10 +1,80 @@
 """Build the pinned standalone MIGraphX EP against the application's ORT SDK."""
+import hashlib
+import json
 import os
+import platform
+import shlex
 import shutil
 import subprocess
 import tarfile
+import tempfile
 import zipfile
 from pathlib import Path
+
+
+def digest(path: Path) -> str:
+    value = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            value.update(block)
+    return value.hexdigest()
+
+
+def plugin_cache_path(lock: dict, cache: Path, rocm: Path, patch: Path) -> Path:
+    version = rocm / ".info/version"
+    identity = {
+        "plugin": lock["migraphx_plugin"],
+        "ort": lock["ort"],
+        "rocm": lock["rocm_version"],
+        "installed_rocm": version.read_text() if version.is_file() else None,
+        "rocm_path": str(rocm),
+        "arch": platform.machine(),
+        "patch": digest(patch),
+        "builder": digest(Path(__file__)),
+        "build_environment": os.environ.get("GEMMA_MIGRAPHX_BUILD_ID", ""),
+        "compiler_environment": {
+            name: os.environ.get(name, "")
+            for name in ("CC", "CXX", "CFLAGS", "CXXFLAGS", "LDFLAGS")
+        },
+        "tools": {
+            "cmake": subprocess.check_output(["cmake", "--version"], text=True),
+            "compiler": subprocess.check_output(
+                [*shlex.split(os.environ.get("CXX") or "c++"), "--version"], text=True
+            ),
+        },
+    }
+    key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+    return cache / "migraphx-plugin-cache" / key
+
+
+def restore_plugin(cached: Path, destination: Path) -> Path | None:
+    names = ("libmigraphx-ep.so", "LICENSE.plugin")
+    try:
+        hashes = json.loads((cached / "manifest.json").read_text())
+        if set(hashes) != set(names) or any(digest(cached / name) != hashes[name] for name in names):
+            return None
+    except (OSError, ValueError, TypeError):
+        return None
+    destination.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        shutil.copy2(cached / name, destination / name)
+    print(f"Reusing verified MIGraphX plugin: {cached}", flush=True)
+    return destination / names[0]
+
+
+def save_plugin(cached: Path, destination: Path) -> None:
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=cached.parent) as temporary:
+        staged = Path(temporary) / "plugin"
+        staged.mkdir()
+        hashes = {}
+        for name in ("libmigraphx-ep.so", "LICENSE.plugin"):
+            shutil.copy2(destination / name, staged / name)
+            hashes[name] = digest(staged / name)
+        (staged / "manifest.json").write_text(json.dumps(hashes, sort_keys=True) + "\n")
+        if cached.exists():
+            shutil.rmtree(cached)
+        staged.replace(cached)
 
 
 def build_plugin(lock: dict, cache: Path, destination: Path, fetch) -> Path:
@@ -14,6 +84,11 @@ def build_plugin(lock: dict, cache: Path, destination: Path, fetch) -> Path:
     for tool in ("cmake", "ninja", "patch", "patchelf"):
         if not shutil.which(tool):
             raise RuntimeError(f"MIGraphX plugin build requires {tool}")
+    patch = Path(__file__).parent / "patches/migraphx-linux-env.patch"
+    cached = plugin_cache_path(lock, cache, rocm, patch)
+    restored = restore_plugin(cached, destination)
+    if restored is not None:
+        return restored
     pinned = lock["migraphx_plugin"]
     work = cache / f"migraphx-plugin-{pinned['commit']}"
     work.mkdir(parents=True, exist_ok=True)
@@ -23,7 +98,6 @@ def build_plugin(lock: dict, cache: Path, destination: Path, fetch) -> Path:
                 raise RuntimeError(f"unsafe source archive path: {member}")
         archive.extractall(work)
     source = work / f"onnxruntime-ep-amdgpu-{pinned['commit']}"
-    patch = Path(__file__).parent / "patches/migraphx-linux-env.patch"
     subprocess.run(["patch", "--batch", "-p1", "-i", str(patch)], cwd=source, check=True)
     sdk_dir = work / "sdk"
     sdk_dir.mkdir(exist_ok=True)
@@ -52,6 +126,7 @@ def build_plugin(lock: dict, cache: Path, destination: Path, fetch) -> Path:
     target = destination / library.name
     shutil.copy2(library, target)
     shutil.copy2(source / "LICENSE", destination / "LICENSE.plugin")
+    save_plugin(cached, destination)
     return target
 
 

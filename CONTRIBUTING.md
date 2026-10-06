@@ -158,6 +158,12 @@ Rules:
 
 `.github/workflows/ci.yml` enforces frontend Biome checks/build and desktop check/clippy/fmt on PRs to `master`, builds desktop bundles on Linux/Windows/macOS, Android ARM64 APK/AAB, and unsigned iOS ARM64 IPA. It also runs on `master` pushes and manual dispatch. Bundle artifacts are retained for seven days; device/GPU inference benchmarks are not automated. A PR with failing checks will not be merged.
 
+CI's Rust cache must use `. -> target` because the Cargo workspace lives at the repository root. GPU edition and provider-feature cache keys are separated to avoid matrix jobs saving incompatible feature sets under one key. Runtime download caches contain only `.cache/runtime-wheels/downloads`; each restored archive is checked against `scripts/runtime_lock.json`. The compiled MIGraphX cache contains only the plugin, its license, and a hash manifest, and is invalidated by the locked source/SDK/ROCm version, patch/build script, and installed build environment. Do not cache expanded ROCm runtimes or the CMake build tree. Desktop upload paths must select completed installers rather than all of `target/release/bundle`. Run the offline cache validation tests after changing these scripts:
+
+```bash
+python3 -m unittest discover -s scripts -p test_runtime_cache.py
+```
+
 ## Model Management & SHA256 Verification
 
 - `models/` is `.gitignore`d. **Never commit** `*.onnx`, `*.onnx_data`, `*.safetensors`.

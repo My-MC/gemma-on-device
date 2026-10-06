@@ -122,6 +122,7 @@ Agents may work in a Git worktree. Each worktree is an isolated working director
 ## Verification
 
 - **CI**: `.github/workflows/ci.yml` runs on pushes/PRs to `master` and manual runs: frontend build; desktop Cargo check/clippy/fmt and bundles on Linux/Windows/macOS; Android ARM64 APK/AAB; and unsigned iOS ARM64 IPA. Bundle artifacts are retained for seven days. It does not prove hardware acceleration or device inference.
+- **CI caches/artifacts**: Rust cache uses `. -> target` for the root workspace, with separate GPU edition/provider-feature keys. Cache only runtime download archives (`.cache/runtime-wheels/downloads`) and the compiled MIGraphX plugin (`.cache/runtime-wheels/migraphx-plugin-cache`), not expanded ROCm runtimes or CMake trees. Downloads and cached plugin files are hash-verified; plugin keys include source/SDK, patch/build script, ROCm packages, and toolchain identity. Upload only completed desktop installers with `compression-level: 0`. Run `python3 -m unittest discover -s scripts -p test_runtime_cache.py` for runtime cache changes; CI runs it in the frontend job.
 - **GUI smoke check**: Confirm the window renders and commands respond. `weston.log` is specific to WSLg; a registered window alone does not validate inference. Rendering warnings are acceptable only when the app works; Vite exit 143 on normal window close is expected.
 
 ### Per-Task Quality Gates (Mandatory)

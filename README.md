@@ -229,6 +229,8 @@ bun run check:ort             # rustc/cargo/ort/models/tauri-cli diagnostics
 
 Desktop editions use `bun run tauri:cuda`, `bun run tauri:migraphx`, and `bun run tauri:coreml`. Each selects its primary execution provider and falls back to WebGPU, then CPU. `scripts/prepare_runtime.py` downloads SHA256-pinned upstream packages and stages the runtime libraries under ignored `runtime-artifacts/`; CI uploads each built edition as a separate 7-day Actions artifact.
 
+CI caches Rust dependencies from the workspace-root `target/`, separating GPU editions and provider-feature checks. Runtime downloads are cached under `.cache/runtime-wheels/downloads` by OS, architecture, edition, and runtime lock hash; restored archives are SHA256-verified before extraction. The compiled MIGraphX plugin is cached separately under `.cache/runtime-wheels/migraphx-plugin-cache`, with invalidation for its source/SDK, patch, build script, ROCm packages, and compiler/CMake versions. Its library and license hashes are checked before reuse; ROCm staging and runtime validation still run each time. Desktop artifacts include only completed installers (`.deb`, `.rpm`, `.AppImage`, `.msi`, setup `.exe`, and `.dmg`), excluding expanded staging directories, and are uploaded without an extra compression pass. The first run for a new cache key builds/downloads normally.
+
 ```bash
 bun run build                 # TypeScript check + Vite frontend build
 bun run tauri build           # Tauri bundle (target/release/bundle, workspace root)

@@ -47,6 +47,10 @@ jobs:
       - name: Stage onnxruntime.dll (Windows)
         if: runner.os == 'Windows'
         run: bun scripts/download_ort_dll.ts --force
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          key: ${{ matrix.feature }}
       - name: Check edition feature
         run: cargo check --manifest-path src-tauri/Cargo.toml --features ${{ matrix.feature }}
       - name: Clippy edition feature
@@ -111,12 +115,35 @@ jobs:
         run: bun install --frozen-lockfile
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri -> target
+          workspaces: . -> target
+          key: ${{ matrix.edition }}
+      - name: Cache pinned runtime downloads
+        uses: actions/cache@v6
+        with:
+          path: .cache/runtime-wheels/downloads
+          key: runtime-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.edition }}-${{ hashFiles('scripts/runtime_lock.json') }}
+      - name: Identify MIGraphX build environment
+        if: matrix.edition == 'migraphx'
+        id: migraphx-build
+        run: |
+          {
+            cmake --version
+            c++ --version
+            dpkg-query -W -f='${binary:Package}=${Version}\n' | LC_ALL=C sort | awk '/^(migraphx|hip|rocm|hsa-rocr|comgr|rocblas|miopen)/'
+          } > "$RUNNER_TEMP/migraphx-build-environment"
+          echo "identity=$(sha256sum "$RUNNER_TEMP/migraphx-build-environment" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - name: Cache compiled MIGraphX plugin
+        if: matrix.edition == 'migraphx'
+        uses: actions/cache@v6
+        with:
+          path: .cache/runtime-wheels/migraphx-plugin-cache
+          key: migraphx-plugin-v1-${{ matrix.os }}-${{ runner.arch }}-${{ steps.migraphx-build.outputs.identity }}-${{ hashFiles('scripts/runtime_lock.json', 'scripts/build_migraphx_plugin.py', 'scripts/patches/**', '.github/workflows/ci.yml') }}
       - name: Build edition bundle
         run: bun run tauri:${{ matrix.edition }}
         env:
           CI: true
           ROCM_PATH: /opt/rocm
+          GEMMA_MIGRAPHX_BUILD_ID: ${{ steps.migraphx-build.outputs.identity }}
       - name: Verify MIGraphX plugin ABI and CPU execution
         if: matrix.edition == 'migraphx'
         run: cargo test --release --manifest-path src-tauri/Cargo.toml --features desktop-migraphx migraphx_plugin_runtime_smoke -- --ignored
@@ -143,7 +170,14 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: gemma-on-device-${{ matrix.edition }}-${{ matrix.os }}-${{ runner.arch }}
-          path: target/release/bundle
+          path: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/rpm/*.rpm
+            target/release/bundle/appimage/*.AppImage
+            target/release/bundle/msi/*.msi
+            target/release/bundle/nsis/*.exe
+            target/release/bundle/dmg/*.dmg
+          compression-level: 0
           retention-days: 7
           if-no-files-found: error
 
@@ -160,6 +194,8 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Check lint, formatting, and imports (Biome)
         run: bun run check:ci
+      - name: Test runtime cache validation
+        run: python3 -m unittest discover -s scripts -p test_runtime_cache.py
       - name: Build (tsc + vite)
         run: bun run build
 
@@ -195,7 +231,7 @@ jobs:
         run: bun scripts/download_ort_dll.ts --force
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri -> target
+          workspaces: . -> target
       - name: cargo check
         run: cargo check --manifest-path src-tauri/Cargo.toml
       - name: cargo clippy
@@ -219,9 +255,15 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: gemma-on-device-${{ matrix.os }}
-          # `tauri build` emits bundles to the workspace-root `target/`, not `src-tauri/target/`
-          # (the workspace is declared in the root `Cargo.toml`).
-          path: target/release/bundle
+          # Upload installers only, excluding expanded bundle staging directories.
+          path: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/rpm/*.rpm
+            target/release/bundle/appimage/*.AppImage
+            target/release/bundle/msi/*.msi
+            target/release/bundle/nsis/*.exe
+            target/release/bundle/dmg/*.dmg
+          compression-level: 0
           retention-days: 7
           if-no-files-found: error
 
@@ -277,7 +319,7 @@ jobs:
         run: bun install --frozen-lockfile
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri -> target
+          workspaces: . -> target
       - name: Initialize Android project
         run: bun run tauri android init --ci
       - name: Configure Android release signing
@@ -357,7 +399,7 @@ jobs:
         run: bun install --frozen-lockfile
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri -> target
+          workspaces: . -> target
       - name: Initialize iOS project
         run: bun run tauri ios init --ci
       - name: Build unsigned iOS IPA for AltStore Classic

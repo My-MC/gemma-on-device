@@ -28,12 +28,13 @@ def digest(path: Path) -> str:
 
 
 def fetch(package: dict) -> Path:
-    CACHE.mkdir(parents=True, exist_ok=True)
-    target = CACHE / Path(package["url"]).name
+    downloads = CACHE / "downloads"
+    downloads.mkdir(parents=True, exist_ok=True)
+    target = downloads / Path(package["url"]).name
     if target.exists() and digest(target) == package["sha256"]:
         return target
     target.unlink(missing_ok=True)
-    with tempfile.NamedTemporaryFile(dir=CACHE, delete=False) as temporary:
+    with tempfile.NamedTemporaryFile(dir=downloads, delete=False) as temporary:
         tmp = Path(temporary.name)
     try:
         request = urllib.request.Request(package["url"], headers={"User-Agent": "gemma-on-device-runtime-preparer"})
