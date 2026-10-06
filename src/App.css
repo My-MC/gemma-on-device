@@ -327,7 +327,8 @@ button.catalog-model.selected {
   flex-direction: column;
   gap: 12px;
 }
-.form label {
+.form label,
+.select-field {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -336,8 +337,7 @@ button.catalog-model.selected {
 }
 textarea,
 input[type="number"],
-input[type="text"],
-select {
+input[type="text"] {
   border: 1px solid var(--border-input);
   border-radius: 8px;
   padding: 10px 12px;
@@ -346,8 +346,7 @@ select {
   background: var(--input-bg);
   color: inherit;
 }
-input,
-option {
+input {
   font-family: inherit;
 }
 textarea {
@@ -502,11 +501,11 @@ button:disabled {
   margin: 10px 0;
 }
 .custom-model-controls input,
-.custom-model-runtime label {
+.custom-model-runtime .select-field {
   flex: 1;
   min-width: 0;
 }
-.custom-model-runtime label,
+.custom-model-runtime .select-field,
 .custom-model-image {
   display: flex;
   flex-direction: column;
@@ -559,11 +558,11 @@ button:disabled {
   font-size: 0.85rem;
   font-weight: 600;
 }
-.model-variant-select {
+.app-select {
   position: relative;
   width: 100%;
 }
-.model-variant-trigger {
+.app-select-trigger {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -576,13 +575,13 @@ button:disabled {
   font-weight: 400;
   background: var(--input-bg);
 }
-.model-variant-trigger > span:first-child {
+.app-select-trigger > span:first-child {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.model-variant-caret {
+.app-select-caret {
   width: 8px;
   height: 8px;
   flex: 0 0 auto;
@@ -590,16 +589,15 @@ button:disabled {
   border-bottom: 1.5px solid currentColor;
   transform: translateY(-2px) rotate(45deg);
 }
-.model-variant-trigger[aria-expanded="true"] .model-variant-caret {
+.app-select-trigger[aria-expanded="true"] .app-select-caret {
   transform: translateY(2px) rotate(225deg);
 }
-.model-variant-listbox {
+.app-select-listbox {
   position: absolute;
   z-index: 20;
   top: calc(100% + 4px);
   left: 0;
-  width: max-content;
-  min-width: 100%;
+  width: 100%;
   max-width: calc(100vw - 32px);
   max-height: 240px;
   overflow-y: auto;
@@ -611,7 +609,7 @@ button:disabled {
   box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
   outline: none;
 }
-.model-variant-option {
+.app-select-option {
   padding: 8px 10px;
   border-radius: 5px;
   font-family: inherit;
@@ -619,18 +617,19 @@ button:disabled {
   font-weight: 400;
   line-height: 1.4;
   cursor: pointer;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
-.model-variant-option[aria-selected="true"] {
+.app-select-option[aria-selected="true"] {
   font-weight: 600;
 }
-.model-variant-option[data-active="true"],
-.model-variant-option:hover {
+.app-select-option[data-active="true"],
+.app-select-option:hover {
   background: var(--info-bg);
   color: var(--info-fg);
 }
-.model-variant-trigger:focus-visible,
-.model-variant-listbox:focus-visible {
+.app-select-trigger:focus-visible,
+.app-select-listbox:focus-visible {
   outline: 2px solid var(--info-fg);
   outline-offset: 2px;
 }

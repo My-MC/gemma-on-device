@@ -5,10 +5,10 @@ import {
   Suspense,
   useCallback,
   useEffect,
-  useId,
   useRef,
   useState,
 } from "react";
+import { AppSelect } from "./AppSelect";
 import {
   DEFAULT_MODEL,
   discoverHuggingFaceModels,
@@ -97,164 +97,6 @@ function readHfModels(): LocalModel[] {
   } catch {
     return [];
   }
-}
-
-function ModelVariantSelect({
-  value,
-  onChange,
-  disabled,
-  labelId,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  disabled: boolean;
-  labelId: string;
-}) {
-  const id = useId();
-  const rootRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const listboxRef = useRef<HTMLDivElement>(null);
-  const selectedIndex = Math.max(
-    0,
-    MODEL_VARIANTS.findIndex((option) => option.value === value),
-  );
-  const [activeIndex, setActiveIndex] = useState(selectedIndex);
-  const [open, setOpen] = useState(false);
-  const selectedOption = MODEL_VARIANTS[selectedIndex];
-
-  useEffect(() => {
-    if (!open) return;
-
-    setActiveIndex(selectedIndex);
-    listboxRef.current?.focus();
-    const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener("pointerdown", closeOnOutsidePointer);
-    return () =>
-      document.removeEventListener("pointerdown", closeOnOutsidePointer);
-  }, [open, selectedIndex]);
-
-  useEffect(() => {
-    if (disabled) setOpen(false);
-  }, [disabled]);
-
-  const openMenu = () => {
-    if (disabled) return;
-    setActiveIndex(selectedIndex);
-    setOpen(true);
-  };
-
-  const closeMenu = (restoreFocus: boolean) => {
-    setOpen(false);
-    if (restoreFocus) triggerRef.current?.focus();
-  };
-
-  const chooseOption = (index: number) => {
-    const option = MODEL_VARIANTS[index];
-    if (!option) return;
-    onChange(option.value);
-    closeMenu(true);
-  };
-
-  const handleListboxKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    switch (event.key) {
-      case "ArrowDown":
-        event.preventDefault();
-        setActiveIndex((index) =>
-          Math.min(index + 1, MODEL_VARIANTS.length - 1),
-        );
-        break;
-      case "ArrowUp":
-        event.preventDefault();
-        setActiveIndex((index) => Math.max(index - 1, 0));
-        break;
-      case "Home":
-        event.preventDefault();
-        setActiveIndex(0);
-        break;
-      case "End":
-        event.preventDefault();
-        setActiveIndex(MODEL_VARIANTS.length - 1);
-        break;
-      case "Enter":
-      case " ":
-        event.preventDefault();
-        chooseOption(activeIndex);
-        break;
-      case "Escape":
-        event.preventDefault();
-        closeMenu(true);
-        break;
-      case "Tab":
-        closeMenu(false);
-        break;
-    }
-  };
-
-  return (
-    <div className="model-variant-select" ref={rootRef}>
-      <button
-        ref={triggerRef}
-        type="button"
-        className="model-variant-trigger"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-controls={`${id}-listbox`}
-        aria-labelledby={`${labelId} ${id}-selected`}
-        disabled={disabled}
-        onClick={() => (open ? closeMenu(false) : openMenu())}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-            event.preventDefault();
-            openMenu();
-          }
-        }}
-      >
-        <span id={`${id}-selected`}>{selectedOption.label}</span>
-        <span className="model-variant-caret" aria-hidden="true" />
-      </button>
-      {open && (
-        <div
-          ref={listboxRef}
-          id={`${id}-listbox`}
-          className="model-variant-listbox"
-          role="listbox"
-          tabIndex={0}
-          aria-labelledby={labelId}
-          aria-activedescendant={`${id}-option-${activeIndex}`}
-          onKeyDown={handleListboxKeyDown}
-        >
-          {MODEL_VARIANTS.map((option, index) => (
-            <div
-              id={`${id}-option-${index}`}
-              key={option.value}
-              className="model-variant-option"
-              role="option"
-              tabIndex={-1}
-              aria-selected={index === selectedIndex}
-              data-active={index === activeIndex}
-              onPointerDown={(event) => event.preventDefault()}
-              onPointerMove={() => setActiveIndex(index)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  chooseOption(index);
-                }
-              }}
-              onClick={(event) => {
-                event.stopPropagation();
-                chooseOption(index);
-              }}
-            >
-              {option.label}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
 }
 
 type SystemInfo = {
@@ -771,23 +613,24 @@ export default function App() {
         </div>
         {hfRepoError && <div className="error">{hfRepoError}</div>}
         <div className="custom-model-runtime">
-          <label>
-            ONNXモデル
-            <select
+          <div className="select-field">
+            <span id="hf-model-label">ONNXモデル</span>
+            <AppSelect
               value={hfModelId}
-              onChange={(event) => {
-                setHfModelId(event.target.value);
+              onChange={(value) => {
+                setHfModelId(value);
                 setModelSelection("huggingface");
               }}
-              disabled={hfSearching || isGenerating || downloading}
-            >
-              {hfAvailableModels.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.name} ({model.dtype.toUpperCase()}) — {model.graph}
-                </option>
-              ))}
-            </select>
-          </label>
+              disabled={
+                hfSearching || isGenerating || downloading || benchRunning
+              }
+              labelId="hf-model-label"
+              options={hfAvailableModels.map((model) => ({
+                value: model.id,
+                label: `${model.name} (${model.dtype.toUpperCase()}) — ${model.graph}`,
+              }))}
+            />
+          </div>
           <button
             type="button"
             className="primary outline"
@@ -863,25 +706,26 @@ export default function App() {
           </label>
 
           <div className="controls">
-            <label>
-              推論モデル（ort）
-              <select
+            <div className="select-field">
+              <span id="inference-model-label">推論モデル（ort）</span>
+              <AppSelect
                 value={modelSelection}
                 disabled={
                   downloading || isGenerating || benchRunning || hfSearching
                 }
-                onChange={(event) =>
-                  setModelSelection(
-                    event.target.value as "gemma" | "huggingface",
-                  )
+                onChange={(value) =>
+                  setModelSelection(value as "gemma" | "huggingface")
                 }
-              >
-                <option value="huggingface">
-                  選択したONNX（既定: LFM2.5）
-                </option>
-                <option value="gemma">旧モデル: Gemma 3 1B</option>
-              </select>
-            </label>
+                labelId="inference-model-label"
+                options={[
+                  {
+                    value: "huggingface",
+                    label: "選択したONNX（既定: LFM2.5）",
+                  },
+                  { value: "gemma", label: "旧モデル: Gemma 3 1B" },
+                ]}
+              />
+            </div>
             <label>
               Max tokens
               <input
@@ -1077,11 +921,12 @@ export default function App() {
           <div className="download-controls">
             <div className="download-variant-field">
               <span id="download-variant-label">Variant</span>
-              <ModelVariantSelect
+              <AppSelect
                 value={variant}
                 onChange={setVariant}
                 disabled={downloading}
                 labelId="download-variant-label"
+                options={MODEL_VARIANTS}
               />
             </div>
             <button

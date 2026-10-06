@@ -176,6 +176,8 @@ Run `bun run check` and `bun run build` before committing frontend changes. CI r
 
 Downloads are **SHA256-verified** (see `models/README.md` and `CONTRIBUTING.md`). After streaming to a temporary `.part` file the hash is checked before atomic rename; on mismatch the file is deleted and the command fails.
 
+All selection menus use `src/AppSelect.tsx` and the bundled Noto Sans JP font, including their option lists. They render inside the application instead of an OS-native popup, so Japanese options do not depend on fonts installed in WSL or the host. Arrow keys, Home/End, Enter/Space, Escape, and Tab are supported.
+
 **Default and additional ONNX models**: LFM2.5 350M Q4 is selected on first launch. Choose **ダウンロードして準備**, or generate directly to acquire it automatically. Other public repositories can be added by ID or URL. The backend pins the commit, inspects graph-relative external tensor dependencies, and saves each model under `models/huggingface/<identity>/` with its own tokenizer and SHA256 manifest. LFS files use Hub SHA256 digests; small Git files are checked against their Git blob digest before SHA256 is recorded. Every saved file is verified before preparation. Private and gated repositories are not supported. The shared definition in `src/default-model.json` supplies the UI, backend default, and CLI downloader. The original product/package name remains for compatibility.
 
 The [official LFM2.5 350M model card](https://huggingface.co/LiquidAI/LFM2.5-350M) describes its Japanese support and intended on-device use. Its small size makes it suitable for initial runtime validation; larger instruction models remain selectable. The model uses the LFM Open License v1.0.
