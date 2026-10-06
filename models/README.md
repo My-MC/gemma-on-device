@@ -2,6 +2,8 @@
 
 Gemma ONNX models for `ort` validation.
 
+The app also includes a browser-based ONNX Runtime Web path using Transformers.js. It includes Gemma 4 E2B, Bonsai 1.7B, LFM2.5 350M, and LFM2.5 1.2B, and can add public Hugging Face repositories compatible with Transformers.js `text-generation` ONNX models. Enter a repository ID or model URL in the Hugging Face panel, select a detected quantization, then use the **Hugging Face ONNX** inference runtime. Added repositories are pinned to their current commit and must expose SHA256 metadata for the selected ONNX weights and `tokenizer.json`. Private and gated repositories are not supported. Browser cached files are independent of the native Rust model directory described below.
+
 ## Expected files (AppState)
 
 Real inference currently uses the default 1B INT4 files:

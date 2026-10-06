@@ -6,9 +6,18 @@ import {
   useCallback,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
 } from "react";
+import {
+  discoverHuggingFaceModels,
+  generateLocalText,
+  LOCAL_MODELS,
+  type LocalModel,
+  loadLocalModel,
+  MODEL_DTYPES,
+} from "./inference";
 import "./App.css";
 
 const LicenseDialog = lazy(() =>
@@ -59,6 +68,35 @@ const MODEL_VARIANTS = [
   { value: "1b-int8", label: "1B INT8 (~1.5GB)" },
   { value: "3n-e2b-int4", label: "3n E2B INT4 (モバイル最適化, 実験的)" },
 ] as const;
+
+const WEB_MODELS_KEY = "gemma-on-device:web-models";
+const WEB_MODEL_KEY = "gemma-on-device:web-model";
+
+function readWebModels(): LocalModel[] {
+  try {
+    const value: unknown = JSON.parse(
+      localStorage.getItem(WEB_MODELS_KEY) ?? "[]",
+    );
+    if (!Array.isArray(value)) return [];
+    return value.filter(
+      (item): item is LocalModel =>
+        item &&
+        typeof item.id === "string" &&
+        typeof item.repo === "string" &&
+        /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/.test(
+          item.repo,
+        ) &&
+        typeof item.revision === "string" &&
+        /^[a-f0-9]{40}$/i.test(item.revision) &&
+        MODEL_DTYPES.includes(item.dtype) &&
+        item.custom === true &&
+        item.sha256 &&
+        typeof item.sha256 === "object",
+    );
+  } catch {
+    return [];
+  }
+}
 
 function ModelVariantSelect({
   value,
@@ -266,6 +304,28 @@ export default function App() {
 
   // Download state
   const [variant, setVariant] = useState("1b-int4");
+  const [webModels, setWebModels] = useState<LocalModel[]>(readWebModels);
+  const webAvailableModels = [...LOCAL_MODELS, ...webModels];
+  const [webModelId, setWebModelId] = useState(() => {
+    const stored = localStorage.getItem(WEB_MODEL_KEY);
+    return stored && webAvailableModels.some((model) => model.id === stored)
+      ? stored
+      : "lfm2.5-350m";
+  });
+  const [inferenceEngine, setInferenceEngine] = useState<"native" | "web">(
+    "native",
+  );
+  const [webRepo, setWebRepo] = useState("");
+  const [webSearching, setWebSearching] = useState(false);
+  const [webRepoError, setWebRepoError] = useState<string | null>(null);
+  const [webModelError, setWebModelError] = useState<string | null>(null);
+  const [webStatus, setWebStatus] = useState<string | null>(null);
+  const [webReadyModels, setWebReadyModels] = useState<string[]>([]);
+  const [image, setImage] = useState<File | null>(null);
+  const imagePreview = useMemo(
+    () => (image ? URL.createObjectURL(image) : null),
+    [image],
+  );
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<
     Record<string, DownloadProgress>
@@ -275,6 +335,27 @@ export default function App() {
   );
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const streamTokensRef = useRef<string[]>([]);
+
+  const selectedWebModel =
+    webAvailableModels.find((model) => model.id === webModelId) ??
+    LOCAL_MODELS[2];
+  const inferenceReady =
+    inferenceEngine === "native" ? listenersReady : Boolean(selectedWebModel);
+
+  useEffect(() => {
+    localStorage.setItem(WEB_MODELS_KEY, JSON.stringify(webModels));
+  }, [webModels]);
+
+  useEffect(() => {
+    localStorage.setItem(WEB_MODEL_KEY, webModelId);
+  }, [webModelId]);
+
+  useEffect(
+    () => () => {
+      if (imagePreview) URL.revokeObjectURL(imagePreview);
+    },
+    [imagePreview],
+  );
 
   const finalizeResult = useCallback((payload: GenerateResult) => {
     // Preserve partial streamed output when inference failed mid-generation
@@ -406,6 +487,48 @@ export default function App() {
     };
 
     try {
+      if (inferenceEngine === "web") {
+        const started = performance.now();
+        await loadLocalModel(selectedWebModel, setWebStatus);
+        setWebReadyModels((previous) =>
+          previous.includes(selectedWebModel.id)
+            ? previous
+            : [...previous, selectedWebModel.id],
+        );
+        const generated = await generateLocalText({
+          model: selectedWebModel,
+          prompt,
+          image: image ?? undefined,
+          maxTokens,
+          temperature,
+          onToken: stream
+            ? (token) => {
+                const next = [...streamTokensRef.current, token];
+                streamTokensRef.current = next;
+                setStreamTokens(next);
+              }
+            : undefined,
+        });
+        const latencyMs = Math.round(performance.now() - started);
+        finalizeResult({
+          text: generated.text,
+          prompt_tokens: 0,
+          generated_tokens: generated.generatedTokens,
+          total_tokens: generated.generatedTokens,
+          latency_ms: latencyMs,
+          tokens_per_sec:
+            latencyMs > 0
+              ? Math.round(
+                  (generated.generatedTokens / (latencyMs / 1000)) * 10,
+                ) / 10
+              : 0,
+          is_mock: false,
+          model_id: `${selectedWebModel.repo} (${selectedWebModel.dtype})`,
+          execution_provider: "ONNX Runtime Web",
+        });
+        return;
+      }
+
       if (stream) {
         const res = await invoke<GenerateResult>("generate_stream", payload);
         if (res) {
@@ -429,6 +552,44 @@ export default function App() {
     setError(null);
     setActiveRuntime(null);
     try {
+      if (inferenceEngine === "web") {
+        await loadLocalModel(selectedWebModel, setWebStatus);
+        setWebReadyModels((previous) =>
+          previous.includes(selectedWebModel.id)
+            ? previous
+            : [...previous, selectedWebModel.id],
+        );
+        const started = performance.now();
+        const tokens: number[] = [];
+        for (let i = 0; i < 3; i += 1) {
+          const generated = await generateLocalText({
+            model: selectedWebModel,
+            prompt: "こんにちは。",
+            maxTokens: 32,
+            temperature: 0,
+          });
+          tokens.push(generated.generatedTokens);
+        }
+        const latency = (performance.now() - started) / 3;
+        const totalTokens = tokens.reduce((sum, count) => sum + count, 0);
+        setBench({
+          model_id: `${selectedWebModel.repo} (${selectedWebModel.dtype})`,
+          platform: system?.platform ?? navigator.platform,
+          arch: system?.arch ?? "browser",
+          prompt: "こんにちは。",
+          iterations: 3,
+          avg_latency_ms: latency,
+          avg_tokens_per_sec:
+            latency > 0 ? totalTokens / 3 / (latency / 1000) : 0,
+          total_tokens: totalTokens,
+          is_mock: false,
+          execution_provider: "ONNX Runtime Web",
+          timestamp: new Date().toISOString(),
+        });
+        setActiveRuntime("ONNX Runtime Web");
+        return;
+      }
+
       const res = await invoke<BenchResult>("bench_inference", {
         iterations: 3,
       });
@@ -449,6 +610,82 @@ export default function App() {
     } catch (e) {
       setError(String(e));
     }
+  }
+
+  async function handleDiscoverWebModel() {
+    setWebSearching(true);
+    setWebRepoError(null);
+    setWebModelError(null);
+    try {
+      const discovered = await discoverHuggingFaceModels(webRepo);
+      setWebModels((previous) => {
+        const next = new Map(previous.map((model) => [model.id, model]));
+        for (const model of discovered) next.set(model.id, model);
+        return [...next.values()];
+      });
+      setWebModelId(discovered[0].id);
+      setInferenceEngine("web");
+      setWebStatus(
+        `${discovered.length}種類の量子化形式を検出しました。モデルを選んで準備してください。`,
+      );
+    } catch (e) {
+      setWebRepoError(String(e));
+    } finally {
+      setWebSearching(false);
+    }
+  }
+
+  async function handlePrepareWebModel() {
+    setWebModelError(null);
+    setWebStatus(null);
+    try {
+      await loadLocalModel(selectedWebModel, setWebStatus);
+      setWebReadyModels((previous) =>
+        previous.includes(selectedWebModel.id)
+          ? previous
+          : [...previous, selectedWebModel.id],
+      );
+      setWebStatus(
+        `${selectedWebModel.repo} (${selectedWebModel.dtype}) を準備しました。`,
+      );
+    } catch (e) {
+      setWebModelError(String(e));
+    }
+  }
+
+  async function handleWebImageChange(
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+    if (!/^image\/(png|jpeg)$/.test(file.type)) {
+      setWebModelError("PNGまたはJPEG画像を選択してください。");
+      input.value = "";
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setWebModelError("画像は10 MiB以下にしてください。");
+      input.value = "";
+      return;
+    }
+    try {
+      const bitmap = await createImageBitmap(file);
+      const withinPixelLimit = bitmap.width * bitmap.height <= 20_000_000;
+      bitmap.close();
+      if (!withinPixelLimit) {
+        setWebModelError("画像は展開後20メガピクセル以下にしてください。");
+        input.value = "";
+        return;
+      }
+    } catch {
+      setWebModelError("画像を読み込めませんでした。");
+      input.value = "";
+      return;
+    }
+    setWebModelError(null);
+    setInferenceEngine("web");
+    setImage(file);
   }
 
   async function handleDownload() {
@@ -651,6 +888,106 @@ export default function App() {
       </section>
 
       <section className="card">
+        <div className="card-title">Hugging Face — 追加ONNXモデル</div>
+        <p className="muted">
+          公開中のTransformers.js対応 text-generation
+          ONNXモデルを追加できます。モデルのcommitとONNX重み・tokenizerのSHA256を確認します。
+        </p>
+        <div className="custom-model-controls">
+          <input
+            type="text"
+            value={webRepo}
+            onChange={(event) => setWebRepo(event.target.value)}
+            placeholder="onnx-community/Qwen3-0.6B-ONNX またはモデルURL"
+            disabled={webSearching || downloading}
+            aria-label="Hugging Face repository"
+          />
+          <button
+            type="button"
+            className="secondary"
+            onClick={handleDiscoverWebModel}
+            disabled={webSearching || downloading || !webRepo.trim()}
+          >
+            {webSearching ? "検索中…" : "検索して追加"}
+          </button>
+        </div>
+        {webRepoError && <div className="error">{webRepoError}</div>}
+        <div className="custom-model-runtime">
+          <label>
+            Web ONNXモデル
+            <select
+              value={webModelId}
+              onChange={(event) => {
+                setWebModelId(event.target.value);
+                setInferenceEngine("web");
+                const model = webAvailableModels.find(
+                  (candidate) => candidate.id === event.target.value,
+                );
+                if (!model?.vision) setImage(null);
+              }}
+              disabled={webSearching || isGenerating || downloading}
+            >
+              {webAvailableModels.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.name} ({model.dtype.toUpperCase()})
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="primary outline"
+            onClick={handlePrepareWebModel}
+            disabled={
+              webSearching || downloading || isGenerating || benchRunning
+            }
+          >
+            {webReadyModels.includes(selectedWebModel.id)
+              ? "モデルを読み込む"
+              : "ダウンロードして準備"}
+          </button>
+        </div>
+        {selectedWebModel.vision && (
+          <label className="custom-model-image">
+            画像入力（Gemma 4 E2B）
+            <input
+              type="file"
+              accept="image/png,image/jpeg"
+              disabled={isGenerating}
+              onChange={handleWebImageChange}
+            />
+            {image && imagePreview && (
+              <span className="image-preview">
+                <img src={imagePreview} alt="選択した画像" />
+                <span>{image.name}</span>
+                <button
+                  type="button"
+                  className="small"
+                  onClick={() => setImage(null)}
+                >
+                  画像を削除
+                </button>
+              </span>
+            )}
+          </label>
+        )}
+        {selectedWebModel.custom && (
+          <div className="muted model-revision">
+            Revision: <code>{selectedWebModel.revision}</code>
+          </div>
+        )}
+        {webStatus && (
+          <div className="muted" role="status">
+            {webStatus}
+          </div>
+        )}
+        {webModelError && <div className="error">{webModelError}</div>}
+        <div className="hint">
+          モデルはブラウザーキャッシュに保存されます。初回はネット接続が必要です。推論時にWebGPUを使い、利用できない場合はWASMへ切り替えます。
+        </div>
+      </section>
+
+      <section className="card">
         <div className="card-title">Inference — プロンプト & パラメータ</div>
         <div className="form">
           <label>
@@ -664,6 +1001,20 @@ export default function App() {
           </label>
 
           <div className="controls">
+            <label>
+              Inference runtime
+              <select
+                value={inferenceEngine}
+                onChange={(event) =>
+                  setInferenceEngine(event.target.value as "native" | "web")
+                }
+              >
+                <option value="native" disabled={Boolean(image)}>
+                  Native ort
+                </option>
+                <option value="web">Hugging Face ONNX</option>
+              </select>
+            </label>
             <label>
               Max tokens
               <input
@@ -685,14 +1036,20 @@ export default function App() {
                 onChange={(e) => setTemperature(Number(e.target.value))}
               />
             </label>
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={useChatTemplate}
-                onChange={(e) => setUseChatTemplate(e.target.checked)}
-              />
-              Gemma chat template
-            </label>
+            {inferenceEngine === "native" ? (
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={useChatTemplate}
+                  onChange={(e) => setUseChatTemplate(e.target.checked)}
+                />
+                Gemma chat template
+              </label>
+            ) : (
+              <span className="muted">
+                モデルのtokenizerとchat templateを使用します。
+              </span>
+            )}
           </div>
 
           <div className="actions">
@@ -702,7 +1059,7 @@ export default function App() {
               disabled={
                 isGenerating ||
                 benchRunning ||
-                !listenersReady ||
+                !inferenceReady ||
                 !prompt.trim()
               }
               onClick={() => handleGenerate(false)}
@@ -715,7 +1072,7 @@ export default function App() {
               disabled={
                 isGenerating ||
                 benchRunning ||
-                !listenersReady ||
+                !inferenceReady ||
                 !prompt.trim()
               }
               onClick={() => handleGenerate(true)}
@@ -727,7 +1084,7 @@ export default function App() {
             <button
               type="button"
               className="small"
-              disabled={benchRunning || isGenerating || !listenersReady}
+              disabled={benchRunning || isGenerating || !inferenceReady}
               onClick={handleBench}
             >
               {benchRunning ? "計測中…" : "ベンチ実行"}

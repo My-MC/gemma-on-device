@@ -18,9 +18,10 @@ A Tauri application to validate whether Rust `ort` (ONNX Runtime) can run Gemma 
 | Frontend | `React` | `^19.3.0` + `react-dom ^19.3.0` | UI |
 | Frontend | `Vite` | `^8.3.0` + `@vitejs/plugin-react ^6.1.1` | Build, `devUrl http://localhost:1420` |
 | Frontend | `TypeScript` | `~7.0.2` | Types |
+| Frontend | `@huggingface/transformers` | `4.3.0` | Optional Hugging Face ONNX inference through WebGPU/WASM |
 | Tauri JS | `@tauri-apps/api` `cli` | `2.12` | `invoke` / `listen` / `emit` |
 | Tauri JS plugin | `@tauri-apps/plugin-opener` | `2.7` | Open URLs and files |
-| Models | Gemma 3 1B INT4 / 3n E2B INT4 | `onnx-community` | Community ONNX, INT4 quantized |
+| Models | Native Gemma 3 1B INT4 / 3n E2B INT4; Web Gemma 4, Bonsai, LFM2.5, and compatible public HF ONNX | Hugging Face | Native Rust `ort` catalog plus Transformers.js WebGPU/WASM text generation |
 
 **JS execution**: `package.json:scripts` call `vite` directly and are run via `bun run dev` / `bun run build`. Do not use `bunx --bun vite`.
 
@@ -45,8 +46,10 @@ Dependency manifests and lockfiles are the version sources; Bun 1.3.14 is the ve
                                                                                  │
                                                                     ort Session  │  onnx: models/gemma-*.onnx
                                                                     + EPs        ▼
-                                                                    CPU / DirectML / CUDA / CoreML / NNAPI
+CPU / DirectML / CUDA / CoreML / NNAPI
 ```
+
+The optional Hugging Face route is separate from the native model directory: `src/inference.ts` uses Transformers.js and ONNX Runtime Web, stores files in browser cache, and selects WebGPU or WASM. Gemma 4 E2B also accepts images on this route.
 
 **Inference fallback**: if the default 1B INT4 graph or tokenizer is missing, the app validates the UI pipeline via `mock_generate`. Real inference uses the graph, `model_q4.onnx_data`, and the 1B tokenizer; errors on that path are returned to the caller. Downloading INT8 or 3n does not switch the inference model. Model status checks graph/tokenizer existence only, and the inference path does not re-verify hashes before loading. Manually verify files copied or changed outside the downloader.
 
@@ -66,6 +69,7 @@ Dependency manifests and lockfiles are the version sources; Bun 1.3.14 is the ve
 ├── src/
 │   ├── App.tsx               # In-app download, model matrix, inference, bench, system
 │   ├── App.css               # download-panel / progress-bar
+│   ├── inference.ts          # Optional Hugging Face ONNX Web runtime and model discovery
 │   ├── main.tsx
 │   └── assets/
 ├── src-tauri/
@@ -172,6 +176,8 @@ Run `bun run check` and `bun run build` before committing frontend changes. CI r
 ### Model Acquisition
 
 Downloads are **SHA256-verified** (see `models/README.md` and `CONTRIBUTING.md`). After streaming to a temporary `.part` file the hash is checked before atomic rename; on mismatch the file is deleted and the command fails.
+
+**Additional Hugging Face ONNX models**: the app also offers a browser-based Transformers.js runtime alongside native Rust `ort`. In the Hugging Face panel, enter a public model ID or URL to discover compatible `text-generation` ONNX repositories and their available quantizations. The app pins the selected model to its repository commit, verifies ONNX and tokenizer SHA256 values from Hub metadata, and caches the files in the browser. Choose **Hugging Face ONNX** in the inference runtime selector to generate with it. Private and gated repositories are not supported.
 
 **From the UI (recommended)**:
 
