@@ -108,7 +108,6 @@
   color: var(--warning);
 }
 
-.badge.ort,
 .pill.INT4 {
   background: var(--secondary);
   color: var(--secondary-foreground);
@@ -353,8 +352,7 @@
 }
 
 .form > label,
-.controls > label,
-.benchmark-prompt {
+.controls > label {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -365,8 +363,7 @@
 }
 
 .form [data-slot="textarea"],
-.form [data-slot="input"],
-.benchmark-prompt textarea {
+.form [data-slot="input"] {
   width: 100%;
   min-height: 56px;
   border-color: var(--outline);
@@ -384,8 +381,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-.form [data-slot="textarea"],
-.benchmark-prompt textarea {
+.form [data-slot="textarea"] {
   min-height: 144px;
   padding: 16px;
   line-height: 1.6;
@@ -393,15 +389,13 @@
 }
 
 .form [data-slot="textarea"]::placeholder,
-.form [data-slot="input"]::placeholder,
-.benchmark-prompt textarea::placeholder {
+.form [data-slot="input"]::placeholder {
   color: var(--muted-foreground);
   opacity: 1;
 }
 
 .form [data-slot="input"]:focus-visible,
-.form [data-slot="textarea"]:focus-visible,
-.benchmark-prompt textarea:focus-visible {
+.form [data-slot="textarea"]:focus-visible {
   border-color: var(--primary);
   outline: 3px solid color-mix(in srgb, var(--primary) 28%, transparent);
   outline-offset: 1px;
@@ -542,10 +536,6 @@
 
 .benchmark-page > [data-slot="button"] {
   align-self: flex-start;
-}
-
-.benchmark-prompt textarea {
-  min-height: 144px;
 }
 
 .theme-setting {
