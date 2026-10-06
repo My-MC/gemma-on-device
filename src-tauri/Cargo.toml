@@ -19,6 +19,10 @@ tauri = { version = "2.12", features = [] }
 tauri-plugin-opener = "2.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+minijinja = { version = "2", features = ["json", "fuel"] }
+minijinja-contrib = { version = "2", features = ["pycompat"] }
+sha1 = "0.10"
+prost = "0.14"
 anyhow = "1.0"
 thiserror = "2.0"
 tokio = { version = "1", features = ["full"] }

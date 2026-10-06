@@ -6,7 +6,6 @@ import {
   useCallback,
   useEffect,
   useId,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -69,13 +68,13 @@ const MODEL_VARIANTS = [
   { value: "3n-e2b-int4", label: "3n E2B INT4 (モバイル最適化, 実験的)" },
 ] as const;
 
-const WEB_MODELS_KEY = "gemma-on-device:web-models";
-const WEB_MODEL_KEY = "gemma-on-device:web-model";
+const HF_MODELS_KEY = "gemma-on-device:hf-models:v2";
+const HF_MODEL_KEY = "gemma-on-device:hf-model:v2";
 
-function readWebModels(): LocalModel[] {
+function readHfModels(): LocalModel[] {
   try {
     const value: unknown = JSON.parse(
-      localStorage.getItem(WEB_MODELS_KEY) ?? "[]",
+      localStorage.getItem(HF_MODELS_KEY) ?? "[]",
     );
     if (!Array.isArray(value)) return [];
     return value.filter(
@@ -86,6 +85,7 @@ function readWebModels(): LocalModel[] {
         /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/.test(
           item.repo,
         ) &&
+        typeof item.graph === "string" &&
         typeof item.revision === "string" &&
         /^[a-f0-9]{40}$/i.test(item.revision) &&
         MODEL_DTYPES.includes(item.dtype) &&
@@ -304,28 +304,23 @@ export default function App() {
 
   // Download state
   const [variant, setVariant] = useState("1b-int4");
-  const [webModels, setWebModels] = useState<LocalModel[]>(readWebModels);
-  const webAvailableModels = [...LOCAL_MODELS, ...webModels];
-  const [webModelId, setWebModelId] = useState(() => {
-    const stored = localStorage.getItem(WEB_MODEL_KEY);
-    return stored && webAvailableModels.some((model) => model.id === stored)
+  const [hfModels, setHfModels] = useState<LocalModel[]>(readHfModels);
+  const hfAvailableModels = [...LOCAL_MODELS, ...hfModels];
+  const [hfModelId, setHfModelId] = useState(() => {
+    const stored = localStorage.getItem(HF_MODEL_KEY);
+    return stored && hfAvailableModels.some((model) => model.id === stored)
       ? stored
       : "lfm2.5-350m";
   });
-  const [inferenceEngine, setInferenceEngine] = useState<"native" | "web">(
-    "native",
+  const [modelSelection, setModelSelection] = useState<"gemma" | "huggingface">(
+    "gemma",
   );
-  const [webRepo, setWebRepo] = useState("");
-  const [webSearching, setWebSearching] = useState(false);
-  const [webRepoError, setWebRepoError] = useState<string | null>(null);
-  const [webModelError, setWebModelError] = useState<string | null>(null);
-  const [webStatus, setWebStatus] = useState<string | null>(null);
-  const [webReadyModels, setWebReadyModels] = useState<string[]>([]);
-  const [image, setImage] = useState<File | null>(null);
-  const imagePreview = useMemo(
-    () => (image ? URL.createObjectURL(image) : null),
-    [image],
-  );
+  const [hfRepo, setHfRepo] = useState("");
+  const [hfSearching, setHfSearching] = useState(false);
+  const [hfRepoError, setHfRepoError] = useState<string | null>(null);
+  const [hfModelError, setHfModelError] = useState<string | null>(null);
+  const [hfStatus, setHfStatus] = useState<string | null>(null);
+  const [hfReadyModels, setHfReadyModels] = useState<string[]>([]);
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<
     Record<string, DownloadProgress>
@@ -336,26 +331,18 @@ export default function App() {
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const streamTokensRef = useRef<string[]>([]);
 
-  const selectedWebModel =
-    webAvailableModels.find((model) => model.id === webModelId) ??
-    LOCAL_MODELS[2];
-  const inferenceReady =
-    inferenceEngine === "native" ? listenersReady : Boolean(selectedWebModel);
+  const selectedHfModel =
+    hfAvailableModels.find((model) => model.id === hfModelId) ??
+    LOCAL_MODELS[0];
+  const inferenceReady = listenersReady;
 
   useEffect(() => {
-    localStorage.setItem(WEB_MODELS_KEY, JSON.stringify(webModels));
-  }, [webModels]);
+    localStorage.setItem(HF_MODELS_KEY, JSON.stringify(hfModels));
+  }, [hfModels]);
 
   useEffect(() => {
-    localStorage.setItem(WEB_MODEL_KEY, webModelId);
-  }, [webModelId]);
-
-  useEffect(
-    () => () => {
-      if (imagePreview) URL.revokeObjectURL(imagePreview);
-    },
-    [imagePreview],
-  );
+    localStorage.setItem(HF_MODEL_KEY, hfModelId);
+  }, [hfModelId]);
 
   const finalizeResult = useCallback((payload: GenerateResult) => {
     // Preserve partial streamed output when inference failed mid-generation
@@ -478,66 +465,32 @@ export default function App() {
     setIsGenerating(true);
     setIsStreaming(stream);
     setActiveRuntime(null);
-
-    const payload = {
-      prompt,
-      maxTokens,
-      temperature,
-      useChatTemplate,
-    };
-
     try {
-      if (inferenceEngine === "web") {
-        const started = performance.now();
-        await loadLocalModel(selectedWebModel, setWebStatus);
-        setWebReadyModels((previous) =>
-          previous.includes(selectedWebModel.id)
-            ? previous
-            : [...previous, selectedWebModel.id],
-        );
+      if (modelSelection === "huggingface") {
+        setHfStatus("ファイルを検証し、ortで生成しています。");
         const generated = await generateLocalText({
-          model: selectedWebModel,
+          model: selectedHfModel,
           prompt,
-          image: image ?? undefined,
           maxTokens,
           temperature,
-          onToken: stream
-            ? (token) => {
-                const next = [...streamTokensRef.current, token];
-                streamTokensRef.current = next;
-                setStreamTokens(next);
-              }
-            : undefined,
+          useChatTemplate,
+          stream,
         });
-        const latencyMs = Math.round(performance.now() - started);
-        finalizeResult({
-          text: generated.text,
-          prompt_tokens: 0,
-          generated_tokens: generated.generatedTokens,
-          total_tokens: generated.generatedTokens,
-          latency_ms: latencyMs,
-          tokens_per_sec:
-            latencyMs > 0
-              ? Math.round(
-                  (generated.generatedTokens / (latencyMs / 1000)) * 10,
-                ) / 10
-              : 0,
-          is_mock: false,
-          model_id: `${selectedWebModel.repo} (${selectedWebModel.dtype})`,
-          execution_provider: "ONNX Runtime Web",
-        });
+        setHfReadyModels((previous) =>
+          previous.includes(selectedHfModel.id)
+            ? previous
+            : [...previous, selectedHfModel.id],
+        );
+        setHfStatus(`ort / ${generated.execution_provider}`);
+        finalizeResult(generated);
         return;
       }
-
-      if (stream) {
-        const res = await invoke<GenerateResult>("generate_stream", payload);
-        if (res) {
-          finalizeResult(res);
-        }
-      } else {
-        const res = await invoke<GenerateResult>("generate", payload);
-        finalizeResult(res);
-      }
+      const payload = { prompt, maxTokens, temperature, useChatTemplate };
+      const res = await invoke<GenerateResult>(
+        stream ? "generate_stream" : "generate",
+        payload,
+      );
+      finalizeResult(res);
     } catch (e) {
       setError(String(e));
       setActiveRuntime(null);
@@ -552,44 +505,44 @@ export default function App() {
     setError(null);
     setActiveRuntime(null);
     try {
-      if (inferenceEngine === "web") {
-        await loadLocalModel(selectedWebModel, setWebStatus);
-        setWebReadyModels((previous) =>
-          previous.includes(selectedWebModel.id)
-            ? previous
-            : [...previous, selectedWebModel.id],
-        );
-        const started = performance.now();
-        const tokens: number[] = [];
+      if (modelSelection === "huggingface") {
+        await loadLocalModel(selectedHfModel, setHfStatus);
+        const runs: GenerateResult[] = [];
         for (let i = 0; i < 3; i += 1) {
-          const generated = await generateLocalText({
-            model: selectedWebModel,
-            prompt: "こんにちは。",
-            maxTokens: 32,
-            temperature: 0,
-          });
-          tokens.push(generated.generatedTokens);
+          runs.push(
+            await generateLocalText({
+              model: selectedHfModel,
+              prompt: "こんにちは。",
+              maxTokens: 32,
+              temperature: 0,
+              useChatTemplate,
+            }),
+          );
         }
-        const latency = (performance.now() - started) / 3;
-        const totalTokens = tokens.reduce((sum, count) => sum + count, 0);
+        const latency =
+          runs.reduce((sum, run) => sum + run.latency_ms, 0) / runs.length;
+        const totalTokens = runs.reduce(
+          (sum, run) => sum + run.generated_tokens,
+          0,
+        );
+        const executionProvider = runs[runs.length - 1].execution_provider;
         setBench({
-          model_id: `${selectedWebModel.repo} (${selectedWebModel.dtype})`,
-          platform: system?.platform ?? navigator.platform,
-          arch: system?.arch ?? "browser",
+          model_id: runs[0].model_id,
+          platform: system?.platform ?? "unknown",
+          arch: system?.arch ?? "unknown",
           prompt: "こんにちは。",
-          iterations: 3,
+          iterations: runs.length,
           avg_latency_ms: latency,
           avg_tokens_per_sec:
-            latency > 0 ? totalTokens / 3 / (latency / 1000) : 0,
+            latency > 0 ? totalTokens / runs.length / (latency / 1000) : 0,
           total_tokens: totalTokens,
           is_mock: false,
-          execution_provider: "ONNX Runtime Web",
+          execution_provider: executionProvider,
           timestamp: new Date().toISOString(),
         });
-        setActiveRuntime("ONNX Runtime Web");
+        setActiveRuntime(executionProvider);
         return;
       }
-
       const res = await invoke<BenchResult>("bench_inference", {
         iterations: 3,
       });
@@ -612,80 +565,47 @@ export default function App() {
     }
   }
 
-  async function handleDiscoverWebModel() {
-    setWebSearching(true);
-    setWebRepoError(null);
-    setWebModelError(null);
+  async function handleDiscoverHfModel() {
+    setHfSearching(true);
+    setHfRepoError(null);
+    setHfModelError(null);
     try {
-      const discovered = await discoverHuggingFaceModels(webRepo);
-      setWebModels((previous) => {
+      const discovered = await discoverHuggingFaceModels(hfRepo);
+      setHfModels((previous) => {
         const next = new Map(previous.map((model) => [model.id, model]));
         for (const model of discovered) next.set(model.id, model);
         return [...next.values()];
       });
-      setWebModelId(discovered[0].id);
-      setInferenceEngine("web");
-      setWebStatus(
-        `${discovered.length}種類の量子化形式を検出しました。モデルを選んで準備してください。`,
+      setHfModelId(discovered[0].id);
+      setModelSelection("huggingface");
+      setHfStatus(
+        `${discovered.length}個のONNXグラフを検出しました。グラフを選んで準備してください。`,
       );
     } catch (e) {
-      setWebRepoError(String(e));
+      setHfRepoError(String(e));
     } finally {
-      setWebSearching(false);
+      setHfSearching(false);
     }
   }
 
-  async function handlePrepareWebModel() {
-    setWebModelError(null);
-    setWebStatus(null);
+  async function handlePrepareHfModel() {
+    setDownloading(true);
+    setDownloadProgress({});
+    setHfModelError(null);
+    setHfStatus(null);
     try {
-      await loadLocalModel(selectedWebModel, setWebStatus);
-      setWebReadyModels((previous) =>
-        previous.includes(selectedWebModel.id)
+      await loadLocalModel(selectedHfModel, setHfStatus);
+      setHfReadyModels((previous) =>
+        previous.includes(selectedHfModel.id)
           ? previous
-          : [...previous, selectedWebModel.id],
+          : [...previous, selectedHfModel.id],
       );
-      setWebStatus(
-        `${selectedWebModel.repo} (${selectedWebModel.dtype}) を準備しました。`,
-      );
+      setModelSelection("huggingface");
     } catch (e) {
-      setWebModelError(String(e));
+      setHfModelError(String(e));
+    } finally {
+      setDownloading(false);
     }
-  }
-
-  async function handleWebImageChange(
-    event: React.ChangeEvent<HTMLInputElement>,
-  ) {
-    const input = event.currentTarget;
-    const file = input.files?.[0];
-    if (!file) return;
-    if (!/^image\/(png|jpeg)$/.test(file.type)) {
-      setWebModelError("PNGまたはJPEG画像を選択してください。");
-      input.value = "";
-      return;
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      setWebModelError("画像は10 MiB以下にしてください。");
-      input.value = "";
-      return;
-    }
-    try {
-      const bitmap = await createImageBitmap(file);
-      const withinPixelLimit = bitmap.width * bitmap.height <= 20_000_000;
-      bitmap.close();
-      if (!withinPixelLimit) {
-        setWebModelError("画像は展開後20メガピクセル以下にしてください。");
-        input.value = "";
-        return;
-      }
-    } catch {
-      setWebModelError("画像を読み込めませんでした。");
-      input.value = "";
-      return;
-    }
-    setWebModelError(null);
-    setInferenceEngine("web");
-    setImage(file);
   }
 
   async function handleDownload() {
@@ -890,46 +810,42 @@ export default function App() {
       <section className="card">
         <div className="card-title">Hugging Face — 追加ONNXモデル</div>
         <p className="muted">
-          公開中のTransformers.js対応 text-generation
-          ONNXモデルを追加できます。モデルのcommitとONNX重み・tokenizerのSHA256を確認します。
+          Hugging Faceの公開ONNXモデルを取得し、Rustのortで推論します。
+          モデルのcommitとSHA256を確認し、選択したグラフの入力形式を検査します。
         </p>
         <div className="custom-model-controls">
           <input
             type="text"
-            value={webRepo}
-            onChange={(event) => setWebRepo(event.target.value)}
+            value={hfRepo}
+            onChange={(event) => setHfRepo(event.target.value)}
             placeholder="onnx-community/Qwen3-0.6B-ONNX またはモデルURL"
-            disabled={webSearching || downloading}
+            disabled={hfSearching || downloading}
             aria-label="Hugging Face repository"
           />
           <button
             type="button"
             className="secondary"
-            onClick={handleDiscoverWebModel}
-            disabled={webSearching || downloading || !webRepo.trim()}
+            onClick={handleDiscoverHfModel}
+            disabled={hfSearching || downloading || !hfRepo.trim()}
           >
-            {webSearching ? "検索中…" : "検索して追加"}
+            {hfSearching ? "検索中…" : "検索して追加"}
           </button>
         </div>
-        {webRepoError && <div className="error">{webRepoError}</div>}
+        {hfRepoError && <div className="error">{hfRepoError}</div>}
         <div className="custom-model-runtime">
           <label>
-            Web ONNXモデル
+            ONNXモデル
             <select
-              value={webModelId}
+              value={hfModelId}
               onChange={(event) => {
-                setWebModelId(event.target.value);
-                setInferenceEngine("web");
-                const model = webAvailableModels.find(
-                  (candidate) => candidate.id === event.target.value,
-                );
-                if (!model?.vision) setImage(null);
+                setHfModelId(event.target.value);
+                setModelSelection("huggingface");
               }}
-              disabled={webSearching || isGenerating || downloading}
+              disabled={hfSearching || isGenerating || downloading}
             >
-              {webAvailableModels.map((model) => (
+              {hfAvailableModels.map((model) => (
                 <option key={model.id} value={model.id}>
-                  {model.name} ({model.dtype.toUpperCase()})
+                  {model.name} ({model.dtype.toUpperCase()}) — {model.graph}
                 </option>
               ))}
             </select>
@@ -937,53 +853,31 @@ export default function App() {
           <button
             type="button"
             className="primary outline"
-            onClick={handlePrepareWebModel}
+            onClick={handlePrepareHfModel}
             disabled={
-              webSearching || downloading || isGenerating || benchRunning
+              hfSearching || downloading || isGenerating || benchRunning
             }
           >
-            {webReadyModels.includes(selectedWebModel.id)
+            {hfReadyModels.includes(selectedHfModel.id)
               ? "モデルを読み込む"
               : "ダウンロードして準備"}
           </button>
         </div>
-        {selectedWebModel.vision && (
-          <label className="custom-model-image">
-            画像入力（Gemma 4 E2B）
-            <input
-              type="file"
-              accept="image/png,image/jpeg"
-              disabled={isGenerating}
-              onChange={handleWebImageChange}
-            />
-            {image && imagePreview && (
-              <span className="image-preview">
-                <img src={imagePreview} alt="選択した画像" />
-                <span>{image.name}</span>
-                <button
-                  type="button"
-                  className="small"
-                  onClick={() => setImage(null)}
-                >
-                  画像を削除
-                </button>
-              </span>
-            )}
-          </label>
-        )}
-        {selectedWebModel.custom && (
+        {selectedHfModel.custom && (
           <div className="muted model-revision">
-            Revision: <code>{selectedWebModel.revision}</code>
+            Revision: <code>{selectedHfModel.revision}</code>
           </div>
         )}
-        {webStatus && (
+        {hfStatus && (
           <div className="muted" role="status">
-            {webStatus}
+            {hfStatus}
           </div>
         )}
-        {webModelError && <div className="error">{webModelError}</div>}
+        {hfModelError && <div className="error">{hfModelError}</div>}
         <div className="hint">
-          モデルはブラウザーキャッシュに保存されます。初回はネット接続が必要です。推論時にWebGPUを使い、利用できない場合はWASMへ切り替えます。
+          モデルはアプリのモデル保存領域へ保存されます。初回取得後はオフラインでも実行できます。
+          推論にはネイティブONNX
+          Runtimeを使い、利用可能なGPUプロバイダーまたはCPUで実行します。
         </div>
       </section>
 
@@ -1002,17 +896,20 @@ export default function App() {
 
           <div className="controls">
             <label>
-              Inference runtime
+              推論モデル（ort）
               <select
-                value={inferenceEngine}
+                value={modelSelection}
+                disabled={
+                  downloading || isGenerating || benchRunning || hfSearching
+                }
                 onChange={(event) =>
-                  setInferenceEngine(event.target.value as "native" | "web")
+                  setModelSelection(
+                    event.target.value as "gemma" | "huggingface",
+                  )
                 }
               >
-                <option value="native" disabled={Boolean(image)}>
-                  Native ort
-                </option>
-                <option value="web">Hugging Face ONNX</option>
+                <option value="gemma">既定のGemma 3</option>
+                <option value="huggingface">選択したHugging Face ONNX</option>
               </select>
             </label>
             <label>
@@ -1036,20 +933,14 @@ export default function App() {
                 onChange={(e) => setTemperature(Number(e.target.value))}
               />
             </label>
-            {inferenceEngine === "native" ? (
-              <label className="checkbox">
-                <input
-                  type="checkbox"
-                  checked={useChatTemplate}
-                  onChange={(e) => setUseChatTemplate(e.target.checked)}
-                />
-                Gemma chat template
-              </label>
-            ) : (
-              <span className="muted">
-                モデルのtokenizerとchat templateを使用します。
-              </span>
-            )}
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={useChatTemplate}
+                onChange={(e) => setUseChatTemplate(e.target.checked)}
+              />
+              モデルのchat template
+            </label>
           </div>
 
           <div className="actions">
@@ -1059,6 +950,7 @@ export default function App() {
               disabled={
                 isGenerating ||
                 benchRunning ||
+                downloading ||
                 !inferenceReady ||
                 !prompt.trim()
               }
@@ -1072,6 +964,7 @@ export default function App() {
               disabled={
                 isGenerating ||
                 benchRunning ||
+                downloading ||
                 !inferenceReady ||
                 !prompt.trim()
               }
@@ -1084,7 +977,9 @@ export default function App() {
             <button
               type="button"
               className="small"
-              disabled={benchRunning || isGenerating || !inferenceReady}
+              disabled={
+                benchRunning || isGenerating || downloading || !inferenceReady
+              }
               onClick={handleBench}
             >
               {benchRunning ? "計測中…" : "ベンチ実行"}

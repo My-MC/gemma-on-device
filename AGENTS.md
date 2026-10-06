@@ -4,7 +4,7 @@ This file defines repository-specific operational rules for agents/contributors 
 
 ## Project Overview
 
-- **Purpose**: Validate whether Rust `ort` (ONNX Runtime) can run Gemma mobile models (3 1B INT4 → 3n E2B INT4) for multi-platform inference via Tauri
+- **Purpose**: Run Hugging Face ONNX models across desktop and mobile through native Rust `ort`, with shared graph execution and adapters for model input contracts.
 - **Package name**: `gemma-on-device` / **identifier**: `com.gemmaondevice.app` / **productName**: `Gemma On Device`
 - **Workspace**: root `Cargo.toml` contains the `src-tauri` crate.
 
@@ -87,6 +87,8 @@ Agents may work in a Git worktree. Each worktree is an isolated working director
 - **SessionBuilder**: `with_execution_providers` moves `self`, so reassign: `let mut builder = builder.with_execution_providers(...)?`
 
 ## Tauri Specifics
+
+- **Hugging Face models**: `huggingface.rs` owns pinned discovery, external tensor inspection, isolated model directories, SHA256 manifests, and session preparation. `decoder.rs` handles causal text graphs and native KV tensors. `src/inference.ts` only invokes Tauri commands; do not reintroduce browser inference dependencies. Unsupported input contracts require native adapters. Non-LFS files are checked against Git blob digests before SHA256 is recorded; every saved file is re-verified before preparation.
 
 - `src-tauri/src/lib.rs:resolve_model_dir_for_app()` prefers existing project `models/` only for non-mobile debug builds; release/mobile builds use `app_data_dir/models`. If app-data resolution fails, it falls back to `resolve_model_dir()`.
 - `src-tauri/capabilities/default.json` grants `core:default` + `opener:default` to the `main` window. App commands are registered in `src-tauri/src/lib.rs:run()` via `generate_handler!`.

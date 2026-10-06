@@ -18,10 +18,9 @@ A Tauri application to validate whether Rust `ort` (ONNX Runtime) can run Gemma 
 | Frontend | `React` | `^19.3.0` + `react-dom ^19.3.0` | UI |
 | Frontend | `Vite` | `^8.3.0` + `@vitejs/plugin-react ^6.1.1` | Build, `devUrl http://localhost:1420` |
 | Frontend | `TypeScript` | `~7.0.2` | Types |
-| Frontend | `@huggingface/transformers` | `4.3.0` | Optional Hugging Face ONNX inference through WebGPU/WASM |
 | Tauri JS | `@tauri-apps/api` `cli` | `2.12` | `invoke` / `listen` / `emit` |
 | Tauri JS plugin | `@tauri-apps/plugin-opener` | `2.7` | Open URLs and files |
-| Models | Native Gemma 3 1B INT4 / 3n E2B INT4; Web Gemma 4, Bonsai, LFM2.5, and compatible public HF ONNX | Hugging Face | Native Rust `ort` catalog plus Transformers.js WebGPU/WASM text generation |
+| Models | Gemma 3 and additional public Hugging Face ONNX graphs | Hugging Face | Native Rust `ort` inference; adapters for graph input contracts |
 
 **JS execution**: `package.json:scripts` call `vite` directly and are run via `bun run dev` / `bun run build`. Do not use `bunx --bun vite`.
 
@@ -49,7 +48,7 @@ Dependency manifests and lockfiles are the version sources; Bun 1.3.14 is the ve
 CPU / DirectML / CUDA / CoreML / NNAPI
 ```
 
-The optional Hugging Face route is separate from the native model directory: `src/inference.ts` uses Transformers.js and ONNX Runtime Web, stores files in browser cache, and selects WebGPU or WASM. Gemma 4 E2B also accepts images on this route.
+All inference uses native Rust `ort`. `src/inference.ts` invokes Tauri commands for Hugging Face discovery, download, loading, and generation. Files are stored in the app's model directory and remain usable offline after a successful download.
 
 **Inference fallback**: if the default 1B INT4 graph or tokenizer is missing, the app validates the UI pipeline via `mock_generate`. Real inference uses the graph, `model_q4.onnx_data`, and the 1B tokenizer; errors on that path are returned to the caller. Downloading INT8 or 3n does not switch the inference model. Model status checks graph/tokenizer existence only, and the inference path does not re-verify hashes before loading. Manually verify files copied or changed outside the downloader.
 
@@ -69,7 +68,7 @@ The optional Hugging Face route is separate from the native model directory: `sr
 ├── src/
 │   ├── App.tsx               # In-app download, model matrix, inference, bench, system
 │   ├── App.css               # download-panel / progress-bar
-│   ├── inference.ts          # Optional Hugging Face ONNX Web runtime and model discovery
+│   ├── inference.ts          # Native Hugging Face Tauri command client
 │   ├── main.tsx
 │   └── assets/
 ├── src-tauri/
@@ -177,7 +176,25 @@ Run `bun run check` and `bun run build` before committing frontend changes. CI r
 
 Downloads are **SHA256-verified** (see `models/README.md` and `CONTRIBUTING.md`). After streaming to a temporary `.part` file the hash is checked before atomic rename; on mismatch the file is deleted and the command fails.
 
-**Additional Hugging Face ONNX models**: the app also offers a browser-based Transformers.js runtime alongside native Rust `ort`. In the Hugging Face panel, enter a public model ID or URL to discover compatible `text-generation` ONNX repositories and their available quantizations. The app pins the selected model to its repository commit, verifies ONNX and tokenizer SHA256 values from Hub metadata, and caches the files in the browser. Choose **Hugging Face ONNX** in the inference runtime selector to generate with it. Private and gated repositories are not supported.
+**Additional Hugging Face ONNX models**: enter a public repository ID or URL, choose an ONNX graph, and select **ダウンロードして準備**. Choose **選択したHugging Face ONNX** in the model selector to generate or benchmark with native `ort`. The backend pins the commit, inspects graph-relative external tensor dependencies, and saves each model under `models/huggingface/<identity>/` with its own tokenizer and SHA256 manifest. LFS files use Hub SHA256 digests; small Git files are checked against their Git blob digest before SHA256 is recorded. Every saved file is verified before preparation. Private and gated repositories are not supported.
+
+The shared text decoder handles `input_ids`, optional masks and positions, `logits`, full-sequence generation, and standard `past_key_values.*` → `present.*` cache tensors. Native cache outputs are retained without Gemma-specific layer counts; float32/float16 caches and logits are supported. Tokenization, EOS tokens, Jinja chat templates, and temperature come from the selected model and generation options. Native execution-provider selection and CPU fallback apply to both model sources.
+
+ONNX graph execution is the common backend. Split embedding/vision graphs, encoder/decoder pipelines, and other input conventions require native adapters and report the required input. The previous browser-only Gemma 4 image flow has been removed. The native catalog includes LFM2.5, Qwen3, and Bonsai; LFM convolution state tensors and `num_logits_to_keep` are handled alongside standard KV caches. Other repositories can be discovered by ID.
+
+The opt-in smoke check downloads small pinned GPT-2, Phi, and Gemma exports and verifies real native inference, streaming, session reuse, and integrity rejection:
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml downloaded_hf_native_smoke -- --ignored --nocapture
+```
+
+It requires network access and does not validate physical-device GPU acceleration.
+
+To validate a real LFM model, including its chat template and external weights (about 280 MB):
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml lfm_hf_native_smoke -- --ignored --nocapture
+```
 
 **From the UI (recommended)**:
 

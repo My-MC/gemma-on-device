@@ -56,6 +56,7 @@ async fn generate(
     use_chat_template: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<GenerateResult, String> {
+    *state.hf_session.lock().await = None;
     let opts = GenerateOptions {
         prompt,
         max_tokens,
@@ -76,6 +77,7 @@ async fn generate_stream(
     use_chat_template: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<GenerateResult, String> {
+    *state.hf_session.lock().await = None;
     let opts = GenerateOptions {
         prompt,
         max_tokens,
@@ -103,6 +105,7 @@ async fn bench_inference(
     iterations: Option<usize>,
     state: State<'_, AppState>,
 ) -> Result<inference::bench::BenchResult, String> {
+    *state.hf_session.lock().await = None;
     let iters = iterations.unwrap_or(3).min(10);
     inference::bench::run_bench(&state, iters)
         .await
@@ -119,6 +122,39 @@ async fn download_model(
     inference::download::download_model(app, state.model_dir.clone(), v)
         .await
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn discover_hf_models(
+    repo: String,
+) -> Result<Vec<inference::huggingface::DiscoveredModel>, String> {
+    inference::huggingface::discover(&repo)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn prepare_hf_model(
+    app: tauri::AppHandle,
+    source: inference::huggingface::ModelSource,
+    state: State<'_, AppState>,
+) -> Result<inference::huggingface::PreparedModel, String> {
+    inference::huggingface::prepare(&app, &state, &source)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn generate_hf(
+    app: tauri::AppHandle,
+    source: inference::huggingface::ModelSource,
+    options: GenerateOptions,
+    stream: bool,
+    state: State<'_, AppState>,
+) -> Result<GenerateResult, String> {
+    inference::decoder::generate(&app, &state, source, options, stream)
+        .await
+        .map_err(|e| format!("{e:#}"))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -146,7 +182,10 @@ pub fn run() {
             generate,
             generate_stream,
             bench_inference,
-            download_model
+            download_model,
+            discover_hf_models,
+            prepare_hf_model,
+            generate_hf
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

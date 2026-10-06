@@ -2,11 +2,13 @@
 
 Gemma ONNX models for `ort` validation.
 
-The app also includes a browser-based ONNX Runtime Web path using Transformers.js. It includes Gemma 4 E2B, Bonsai 1.7B, LFM2.5 350M, and LFM2.5 1.2B, and can add public Hugging Face repositories compatible with Transformers.js `text-generation` ONNX models. Enter a repository ID or model URL in the Hugging Face panel, select a detected quantization, then use the **Hugging Face ONNX** inference runtime. Added repositories are pinned to their current commit and must expose SHA256 metadata for the selected ONNX weights and `tokenizer.json`. Private and gated repositories are not supported. Browser cached files are independent of the native Rust model directory described below.
+Additional Hugging Face models use native Rust `ort`. Enter a public repository ID or URL, select a graph, then download and prepare it. Files are isolated under `models/huggingface/<identity>/`, preserving graph-relative external tensor paths. Each model has its own tokenizer and `manifest.json` with the pinned commit and file SHA256 digests. Every file is verified before preparation; saved manifests support offline use. LFS files use Hub SHA256 metadata. Non-LFS metadata/tokenizer files are checked against their Git blob digest before SHA256 is recorded.
+
+The generic text decoder handles standalone causal graphs with `input_ids`/`logits`, optional masks and positions, and standard `past_key_values.*`/`present.*` cache tensors. Split embedding/vision graphs and other input conventions require native adapters and produce compatibility errors. Browser-only inference and image preparation have been removed.
 
 ## Expected files (AppState)
 
-Real inference currently uses the default 1B INT4 files:
+The default Gemma path uses these 1B INT4 files; additional models use their own directories:
 - `models/gemma-3-1b-it-int4.onnx` (+ `models/model_q4.onnx_data` kept literal) — Phase1
 - `models/tokenizer.json` — 1B tokenizer (SentencePiece)
 

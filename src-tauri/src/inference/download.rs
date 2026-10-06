@@ -124,7 +124,7 @@ fn part_path(dest: &Path) -> PathBuf {
     PathBuf::from(format!("{}.part", dest.display()))
 }
 
-async fn compute_sha256(path: &Path) -> Result<String> {
+pub(super) async fn compute_sha256(path: &Path) -> Result<String> {
     let mut file = tokio::fs::File::open(path)
         .await
         .with_context(|| format!("open for sha256 {:?}", path))?;
@@ -140,7 +140,7 @@ async fn compute_sha256(path: &Path) -> Result<String> {
     Ok(hex::encode(hasher.finalize()))
 }
 
-async fn verify_sha256(path: &Path, expected: &str) -> Result<()> {
+pub(super) async fn verify_sha256(path: &Path, expected: &str) -> Result<()> {
     let actual = compute_sha256(path).await?;
     if !actual.eq_ignore_ascii_case(expected) {
         anyhow::bail!(
@@ -173,7 +173,7 @@ async fn remote_content_length(client: &reqwest::Client, url: &str) -> Option<u6
     resp.content_length().filter(|&n| n > 0)
 }
 
-fn build_client() -> Result<reqwest::Client> {
+pub(super) fn build_client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .user_agent("gemma-on-device/1.0")
         .read_timeout(Duration::from_secs(60))
@@ -182,13 +182,39 @@ fn build_client() -> Result<reqwest::Client> {
         .context("build reqwest client")
 }
 
-async fn download_one(
+pub(super) async fn download_one(
     app: &AppHandle,
     url: String,
     dest: PathBuf,
     file_label: String,
-    expected_sha256: Option<&'static str>,
+    expected_sha256: Option<&str>,
 ) -> Result<()> {
+    download_file(Some(app), url, dest, file_label, expected_sha256).await
+}
+
+struct OptionalApp<'a>(Option<&'a AppHandle>);
+
+impl OptionalApp<'_> {
+    fn emit<S: Serialize + Clone>(
+        &self,
+        event: &str,
+        payload: S,
+    ) -> std::result::Result<(), tauri::Error> {
+        match self.0 {
+            Some(app) => app.emit(event, payload),
+            None => Ok(()),
+        }
+    }
+}
+
+pub(super) async fn download_file(
+    app: Option<&AppHandle>,
+    url: String,
+    dest: PathBuf,
+    file_label: String,
+    expected_sha256: Option<&str>,
+) -> Result<()> {
+    let app = OptionalApp(app);
     if let Some(parent) = dest.parent() {
         tokio::fs::create_dir_all(parent)
             .await
