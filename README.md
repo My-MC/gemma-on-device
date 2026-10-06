@@ -426,8 +426,8 @@ bun run build  # also runs tsc
 
 ## License
 
-Validation project. Gemma models are under the Gemma License, ONNX Runtime is MIT.
-The app's footer opens the license viewer for the JavaScript and Rust dependencies, plus ONNX Runtime license files when the Windows DLL is bundled. License data is generated for the active target and Cargo features during development and builds. Set `GEMMA_CARGO_FEATURES` to match any extra features passed to Tauri. Run `bun run licenses:generate` to refresh the report; missing license identifiers or texts stop generation.
+Validation project. Gemma models are subject to the Gemma Terms of Use; ONNX Runtime is MIT.
+The app's footer opens the license viewer for JavaScript and Rust dependencies, bundled runtime license files, and the downloadable Gemma model variants. Model entries show the Gemma license notice, ONNX model source, and a link to Google's current full terms. License data is generated for the active target and Cargo features during development and builds. Set `GEMMA_CARGO_FEATURES` to match any extra features passed to Tauri. Run `bun run licenses:generate` to refresh the report; missing license identifiers or texts stop generation.
 
 ## Development Notes
 

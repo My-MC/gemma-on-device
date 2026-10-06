@@ -1,0 +1,44 @@
+[
+  {
+    "name": "Gemma 3 1B INT4 (ONNX)",
+    "version": "",
+    "ecosystem": "Model",
+    "license": "Gemma Terms of Use",
+    "repository": "https://huggingface.co/onnx-community/gemma-3-1b-it-ONNX",
+    "licenseUrl": "https://ai.google.dev/gemma/terms",
+    "files": [
+      {
+        "name": "Gemma license notice",
+        "text": "Base model: google/gemma-3-1b-it\nONNX model source: onnx-community/gemma-3-1b-it-ONNX\n\nGemma is provided under and subject to the Gemma Terms of Use found at ai.google.dev/gemma/terms.\n\nThe Gemma Terms of Use include restrictions on use and redistribution. Read the full, current terms at the official link above."
+      }
+    ]
+  },
+  {
+    "name": "Gemma 3 1B INT8 (ONNX)",
+    "version": "",
+    "ecosystem": "Model",
+    "license": "Gemma Terms of Use",
+    "repository": "https://huggingface.co/onnx-community/gemma-3-1b-it-ONNX",
+    "licenseUrl": "https://ai.google.dev/gemma/terms",
+    "files": [
+      {
+        "name": "Gemma license notice",
+        "text": "Base model: google/gemma-3-1b-it\nONNX model source: onnx-community/gemma-3-1b-it-ONNX\n\nGemma is provided under and subject to the Gemma Terms of Use found at ai.google.dev/gemma/terms.\n\nThe Gemma Terms of Use include restrictions on use and redistribution. Read the full, current terms at the official link above."
+      }
+    ]
+  },
+  {
+    "name": "Gemma 3n E2B INT4 (ONNX)",
+    "version": "",
+    "ecosystem": "Model",
+    "license": "Gemma Terms of Use",
+    "repository": "https://huggingface.co/onnx-community/gemma-3n-E2B-it-ONNX",
+    "licenseUrl": "https://ai.google.dev/gemma/terms",
+    "files": [
+      {
+        "name": "Gemma license notice",
+        "text": "Base model: google/gemma-3n-E2B-it\nONNX model source: onnx-community/gemma-3n-E2B-it-ONNX\n\nGemma is provided under and subject to the Gemma Terms of Use found at ai.google.dev/gemma/terms.\n\nThe Gemma Terms of Use include restrictions on use and redistribution. Read the full, current terms at the official link above."
+      }
+    ]
+  }
+]

@@ -17,9 +17,10 @@ type CargoPackage = {
 type LicenseEntry = {
   name: string;
   version: string;
-  ecosystem: "JavaScript" | "Rust" | "Runtime";
+  ecosystem: "JavaScript" | "Rust" | "Runtime" | "Model";
   license: string;
   repository?: string;
+  licenseUrl?: string;
   files: { name: string; text: string }[];
 };
 
@@ -296,6 +297,13 @@ async function addRuntimeLicenses(): Promise<void> {
   }
 }
 
+async function addModelLicenses(): Promise<void> {
+  const modelLicenses = JSON.parse(
+    await readFile(join(root, "scripts/model_licenses.json"), "utf8"),
+  ) as LicenseEntry[];
+  for (const entry of modelLicenses) addEntry(entry);
+}
+
 async function addRuntimeDirectoryLicenses(
   directory: string,
   name: string,
@@ -339,6 +347,7 @@ await generateRust(
   edition === "default" ? [] : [`desktop-${edition}`],
 );
 await addRuntimeLicenses();
+await addModelLicenses();
 
 if (failures.length) {
   console.error(

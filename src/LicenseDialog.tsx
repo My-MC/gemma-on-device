@@ -6,9 +6,10 @@ type LicenseFile = { name: string; textId: number };
 type LicensePackage = {
   name: string;
   version: string;
-  ecosystem: "JavaScript" | "Rust" | "Runtime";
+  ecosystem: "JavaScript" | "Rust" | "Runtime" | "Model";
   license: string;
   repository?: string;
+  licenseUrl?: string;
   files: LicenseFile[];
 };
 
@@ -19,7 +20,13 @@ type LicenseReport = {
   texts: { name: string; text: string }[];
 };
 
-const ecosystems = ["すべて", "JavaScript", "Rust", "Runtime"] as const;
+const ecosystems = [
+  "すべて",
+  "JavaScript",
+  "Rust",
+  "Runtime",
+  "Model",
+] as const;
 
 export function LicenseDialog({ onClose }: { onClose: () => void }) {
   const dialogRef = useRef<HTMLElement>(null);
@@ -106,7 +113,7 @@ export function LicenseDialog({ onClose }: { onClose: () => void }) {
       >
         <header className="license-header">
           <div>
-            <h2 id="license-dialog-title">オープンソースライセンス</h2>
+            <h2 id="license-dialog-title">ライブラリ・モデルのライセンス</h2>
             <p>
               {report
                 ? `${report.edition} · ${report.target} · ${report.packages.length} 件`
@@ -124,7 +131,7 @@ export function LicenseDialog({ onClose }: { onClose: () => void }) {
         </header>
         <div className="license-toolbar">
           <label>
-            <span className="sr-only">ライブラリを検索</span>
+            <span className="sr-only">ライブラリ・モデルを検索</span>
             <input
               ref={searchRef}
               type="search"
@@ -134,7 +141,7 @@ export function LicenseDialog({ onClose }: { onClose: () => void }) {
             />
           </label>
           {/* Native GTK select popups cannot use the bundled Japanese webfont. */}
-          <fieldset className="license-ecosystems" aria-label="環境を絞り込む">
+          <fieldset className="license-ecosystems" aria-label="種別を絞り込む">
             {ecosystems.map((item) => (
               <button
                 key={item}
@@ -166,7 +173,7 @@ export function LicenseDialog({ onClose }: { onClose: () => void }) {
               <details>
                 <summary>
                   <span className="license-package-name">
-                    {pkg.name} <small>v{pkg.version}</small>
+                    {pkg.name} {pkg.version && <small>v{pkg.version}</small>}
                   </span>
                   <span className="license-tags">
                     <span className="badge">{pkg.ecosystem}</span>
@@ -181,6 +188,13 @@ export function LicenseDialog({ onClose }: { onClose: () => void }) {
                       </a>
                     </p>
                   )}
+                  {pkg.licenseUrl && (
+                    <p>
+                      <a href={pkg.licenseUrl} target="_blank" rel="noreferrer">
+                        ライセンス全文（公式）
+                      </a>
+                    </p>
+                  )}
                   {pkg.files.map((file) => (
                     <section key={file.name}>
                       <h3>{file.name}</h3>
@@ -192,7 +206,9 @@ export function LicenseDialog({ onClose }: { onClose: () => void }) {
             </article>
           ))}
           {report && filtered.length === 0 && (
-            <p className="license-empty">該当するライブラリはありません。</p>
+            <p className="license-empty">
+              該当するライブラリまたはモデルはありません。
+            </p>
           )}
         </div>
       </section>
