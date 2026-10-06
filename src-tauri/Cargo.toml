@@ -3,6 +3,7 @@ name = "gemma-on-device"
 version = "0.1.0"
 description = "Gemma on-device inference with ort + Tauri (Bun + React) - multi-platform validation"
 authors = ["you"]
+license = "MIT"
 edition = "2021"
 rust-version = "1.77"
 

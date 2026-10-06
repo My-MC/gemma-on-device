@@ -91,6 +91,9 @@ function addEntry(entry: LicenseEntry): void {
 }
 
 async function generateJavaScript(): Promise<void> {
+  const project = JSON.parse(
+    await readFile(join(root, "package.json"), "utf8"),
+  ) as { name: string; license?: string };
   const customPath = join(root, "scripts/license-checker-custom.json");
   const output = run([
     "bun",
@@ -127,7 +130,10 @@ async function generateJavaScript(): Promise<void> {
       name: pkg.name ?? name,
       version: pkg.version ?? version,
       ecosystem: "JavaScript",
-      license: normalizedLicense(pkg.licenses),
+      license:
+        pkg.name === project.name && project.license
+          ? project.license
+          : normalizedLicense(pkg.licenses),
       ...(pkg.repository ? { repository: pkg.repository } : {}),
       files: text
         ? [{ name: basename(pkg.licenseFile ?? "LICENSE"), text }]
