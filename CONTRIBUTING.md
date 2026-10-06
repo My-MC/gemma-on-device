@@ -201,6 +201,8 @@ Rules:
 
 ## Mobile
 
+- Desktop editions use `bun run tauri:cuda`, `bun run tauri:migraphx`, and `bun run tauri:coreml`. Each downloads SHA256-pinned upstream packages and stages the required user-space libraries locally; Linux MIGraphX uses a standalone plugin built against ORT 1.30.0 in the same process; packaging requires ROCm 7.2.1 development packages, CMake 4.2+, Ninja, patch, and patchelf and includes HIPRTC and GPU kernel data. CI stages the same packages and uploads each built app as a separate 7-day artifact. See README for details.
+
 - Android: `cargo ndk` targets `aarch64-linux-android` etc., with explicit `xnnpack`/`nnapi` features when needed. iOS: `aarch64-apple-ios`, with explicit `coreml` when needed. CoreML is not enabled automatically. See `README.md` for SDK setup.
 - Generated projects under `src-tauri/gen/` are ignored. iOS config sets minimum version 15.1; set `bundle.iOS.developmentTeam` to your own signing team before building.
 - CI builds Android ARM64 APK/AAB on `master` pushes, pull requests, and manual runs. Packages are signed when `ANDROID_KEY_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and `ANDROID_STORE_PASSWORD` repository secrets are available; otherwise they are unsigned. Fork PRs do not receive those secrets. Unsigned APKs must be signed before installation.

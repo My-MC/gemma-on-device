@@ -156,6 +156,21 @@
   flex-wrap: wrap;
   align-items: center;
 }
+.runtime-status {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: var(--info-bg);
+  color: var(--info-fg);
+}
+.runtime-label {
+  font-size: 0.75rem;
+}
+.runtime-status strong {
+  font-size: 0.95rem;
+}
 .badge {
   padding: 4px 10px;
   border-radius: 999px;
@@ -438,12 +453,6 @@ button:disabled {
   flex-direction: column;
   gap: 4px;
 }
-.ep-matrix {
-  margin-top: 10px;
-  font-size: 0.8rem;
-  color: var(--text-soft);
-}
-
 /* Download panel */
 .download-panel {
   margin-top: 16px;

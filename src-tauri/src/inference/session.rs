@@ -20,24 +20,27 @@ pub struct ModelInfo {
 /// Shared app state for Tauri
 pub struct AppState {
     pub session: Arc<Mutex<Option<InferenceSession>>>,
+    pub model_integrity: tokio::sync::OnceCell<()>,
     pub model_dir: PathBuf,
+    pub runtime_dir: PathBuf,
+    pub app_handle: Option<tauri::AppHandle>,
 }
 
 pub struct InferenceSession {
     pub session: Session,
+    pub execution_provider: String,
     #[allow(dead_code)]
     pub model_info: ModelInfo,
 }
 
-#[allow(dead_code)]
-const APPLE_SILICON_COREML: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
-
-/// Execution provider selected first for this build. Unsupported CoreML nodes
-/// continue on ONNX Runtime's CPU provider.
+/// First execution provider registered for this build. Execution providers
+/// are tried in priority order and unsupported nodes fall back to CPU.
 #[allow(dead_code)]
 pub fn preferred_execution_provider() -> &'static str {
-    if APPLE_SILICON_COREML || cfg!(feature = "coreml") {
+    if cfg!(feature = "coreml") {
         "CoreML (GPU + CPU fallback)"
+    } else if cfg!(feature = "migraphx") {
+        "MIGraphX"
     } else if cfg!(feature = "tensorrt") {
         "TensorRT"
     } else if cfg!(feature = "cuda") {
@@ -46,16 +49,33 @@ pub fn preferred_execution_provider() -> &'static str {
         "DirectML"
     } else if cfg!(feature = "nnapi") {
         "NNAPI"
+    } else if cfg!(feature = "xnnpack") {
+        "XNNPACK"
+    } else if cfg!(feature = "webgpu") {
+        "WebGPU"
     } else {
         "CPU"
     }
 }
 
 impl AppState {
-    pub fn new(model_dir: PathBuf) -> Self {
+    pub fn new(model_dir: PathBuf, runtime_dir: PathBuf) -> Self {
         Self {
             session: Arc::new(Mutex::new(None)),
+            model_integrity: tokio::sync::OnceCell::new(),
             model_dir,
+            runtime_dir,
+            app_handle: None,
+        }
+    }
+
+    pub fn report_execution_provider(&self, provider: Option<&str>) {
+        use tauri::Emitter;
+
+        if let Some(app) = &self.app_handle {
+            if let Err(error) = app.emit("runtime-changed", provider) {
+                eprintln!("[emit] runtime-changed failed: {error}");
+            }
         }
     }
 
@@ -116,12 +136,23 @@ impl AppState {
     pub fn default_tokenizer_path(&self) -> PathBuf {
         self.model_dir.join("tokenizer.json")
     }
+
+    pub async fn verify_default_model(&self) -> Result<()> {
+        self.model_integrity
+            .get_or_try_init(|| async {
+                super::download::verify_default_model_files(&self.model_dir).await
+            })
+            .await
+            .map(|_| ())
+    }
 }
 
-/// Create an ort session with platform-appropriate execution providers
-pub fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Session> {
-    let _ = ort::init().commit();
-
+/// Create a session by trying the edition's primary EP, WebGPU, then CPU.
+pub fn create_session<P: AsRef<Path>>(
+    model_path: P,
+    runtime_dir: &Path,
+    excluded_providers: &[String],
+) -> Result<(Session, String)> {
     let mut builder = Session::builder().map_err(|e| anyhow::anyhow!("{}", e))?;
     builder = builder
         .with_optimization_level(GraphOptimizationLevel::Level3)
@@ -158,26 +189,152 @@ pub fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Session> {
             .map_err(|e| anyhow::anyhow!("{}", e))?;
     }
 
-    #[cfg(any(feature = "coreml", all(target_os = "macos", target_arch = "aarch64")))]
+    let model_path = model_path.as_ref();
+    let mut errors = Vec::new();
+    for provider in configured_providers() {
+        if excluded_providers
+            .iter()
+            .any(|excluded| excluded == provider.name())
+        {
+            continue;
+        }
+        match create_session_with_provider(builder.clone(), model_path, runtime_dir, provider) {
+            Ok(session) => return Ok((session, provider.name().to_string())),
+            Err(error) => errors.push(format!("{}: {error}", provider.name())),
+        }
+    }
+
+    if excluded_providers.iter().any(|excluded| excluded == "CPU") {
+        anyhow::bail!(
+            "Could not create an inference session. {}",
+            errors.join("; ")
+        )
+    }
+    match builder
+        .commit_from_file(model_path)
+        .map_err(|e| anyhow::anyhow!("{}", e))
+    {
+        Ok(session) => Ok((session, "CPU".to_string())),
+        Err(error) => {
+            errors.push(format!("CPU: {error}"));
+            Err(anyhow::anyhow!(
+                "Could not create an inference session. {}",
+                errors.join("; ")
+            ))
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Provider {
+    #[cfg(any(
+        feature = "cuda",
+        feature = "coreml",
+        feature = "tensorrt",
+        feature = "directml",
+        feature = "nnapi",
+        feature = "xnnpack"
+    ))]
+    Primary,
+    #[cfg(feature = "migraphx")]
+    MIGraphX,
+    #[cfg(feature = "webgpu")]
+    WebGpu,
+}
+
+impl Provider {
+    fn name(self) -> &'static str {
+        match self {
+            #[cfg(any(
+                feature = "cuda",
+                feature = "coreml",
+                feature = "tensorrt",
+                feature = "directml",
+                feature = "nnapi",
+                feature = "xnnpack"
+            ))]
+            Self::Primary => preferred_execution_provider(),
+            #[cfg(feature = "migraphx")]
+            Self::MIGraphX => "MIGraphX",
+            #[cfg(feature = "webgpu")]
+            Self::WebGpu => "WebGPU",
+        }
+    }
+}
+
+#[allow(clippy::vec_init_then_push)]
+fn configured_providers() -> Vec<Provider> {
+    #[allow(unused_mut)]
+    let mut providers = Vec::new();
+    #[cfg(any(
+        feature = "cuda",
+        feature = "coreml",
+        feature = "tensorrt",
+        feature = "directml",
+        feature = "nnapi",
+        feature = "xnnpack"
+    ))]
+    providers.push(Provider::Primary);
+    #[cfg(feature = "migraphx")]
+    providers.push(Provider::MIGraphX);
+    #[cfg(feature = "webgpu")]
+    providers.push(Provider::WebGpu);
+    providers
+}
+
+#[allow(unused_variables, dead_code)]
+fn create_session_with_provider(
+    builder: ort::session::builder::SessionBuilder,
+    model_path: &Path,
+    runtime_dir: &Path,
+    provider: Provider,
+) -> Result<Session> {
+    match provider {
+        #[cfg(any(
+            feature = "cuda",
+            feature = "coreml",
+            feature = "tensorrt",
+            feature = "directml",
+            feature = "nnapi",
+            feature = "xnnpack"
+        ))]
+        Provider::Primary => create_primary_session(builder, model_path, runtime_dir),
+        #[cfg(feature = "migraphx")]
+        Provider::MIGraphX => create_plugin_session(
+            builder,
+            model_path,
+            "MIGraphXExecutionProvider",
+            "MIGraphXExecutionProvider",
+            migraphx_library_path(runtime_dir),
+        ),
+        #[cfg(feature = "webgpu")]
+        Provider::WebGpu => create_webgpu_session(builder, model_path, runtime_dir),
+    }
+}
+
+#[allow(dead_code)]
+fn create_primary_session(
+    builder: ort::session::builder::SessionBuilder,
+    model_path: &Path,
+    _runtime_dir: &Path,
+) -> Result<Session> {
+    #[cfg(feature = "coreml")]
     let coreml_cache_dir = model_path
-        .as_ref()
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join(".coreml-cache");
-    #[cfg(any(feature = "coreml", all(target_os = "macos", target_arch = "aarch64")))]
+    #[cfg(feature = "coreml")]
     std::fs::create_dir_all(&coreml_cache_dir)?;
-
-    // Execution providers are ordered by priority and unsupported nodes fall
-    // back to CPU. Apple Silicon desktop builds enable CoreML automatically.
     #[cfg(feature = "xnnpack")]
     let xnn_threads = std::num::NonZeroUsize::new(
         std::thread::available_parallelism()
-            .map(|n| n.get())
+            .map(|count| count.get())
             .unwrap_or(4)
             .clamp(1, 4),
     )
     .unwrap();
-    let mut builder = builder
+
+    builder
         .with_execution_providers([
             #[cfg(feature = "tensorrt")]
             ort::ep::TensorRT::default().build(),
@@ -185,7 +342,7 @@ pub fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Session> {
             ort::ep::CUDA::default().build(),
             #[cfg(feature = "directml")]
             ort::ep::DirectML::default().build(),
-            #[cfg(any(feature = "coreml", all(target_os = "macos", target_arch = "aarch64")))]
+            #[cfg(feature = "coreml")]
             {
                 let profile_compute_plan =
                     std::env::var("GEMMA_COREML_PROFILE").as_deref() == Ok("1");
@@ -204,12 +361,107 @@ pub fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Session> {
                 .with_intra_op_num_threads(xnn_threads)
                 .build(),
         ])
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
-
-    let session = builder
+        .map_err(|e| anyhow::anyhow!("{}", e))?
         .commit_from_file(model_path)
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
-    Ok(session)
+        .map_err(|e| anyhow::anyhow!("{}", e))
+}
+
+#[cfg(feature = "webgpu")]
+fn create_webgpu_session(
+    builder: ort::session::builder::SessionBuilder,
+    model_path: &Path,
+    runtime_dir: &Path,
+) -> Result<Session> {
+    create_plugin_session(
+        builder,
+        model_path,
+        "WebGPU",
+        "WebGpuExecutionProvider",
+        webgpu_library_path(runtime_dir),
+    )
+}
+
+#[cfg(any(feature = "webgpu", feature = "migraphx"))]
+fn create_plugin_session(
+    builder: ort::session::builder::SessionBuilder,
+    model_path: &Path,
+    registration_name: &'static str,
+    execution_provider_name: &str,
+    library_path: PathBuf,
+) -> Result<Session> {
+    use ort::environment::Environment;
+    use std::sync::OnceLock;
+
+    #[cfg(feature = "webgpu")]
+    static WEBGPU_REGISTRATION: OnceLock<std::result::Result<(), String>> = OnceLock::new();
+    #[cfg(feature = "migraphx")]
+    static MIGRAPHX_REGISTRATION: OnceLock<std::result::Result<(), String>> = OnceLock::new();
+    let env = Environment::current().map_err(|e| anyhow::anyhow!("{}", e))?;
+    let registration_cache = match registration_name {
+        #[cfg(feature = "webgpu")]
+        "WebGPU" => &WEBGPU_REGISTRATION,
+        #[cfg(feature = "migraphx")]
+        "MIGraphXExecutionProvider" => &MIGRAPHX_REGISTRATION,
+        _ => anyhow::bail!("unsupported plugin registration: {registration_name}"),
+    };
+    let registration = registration_cache.get_or_init(|| {
+        let library = env
+            .register_ep_library(registration_name, &library_path)
+            .map_err(|e| e.to_string())?;
+        if !env.devices().any(|device| {
+            device
+                .ep()
+                .is_ok_and(|name| name == execution_provider_name)
+        }) {
+            // A failed HIP enumeration must not prevent the next plugin's enumeration.
+            library.unregister().map_err(|e| e.to_string())?;
+            return Err(format!("{registration_name} EP has no usable device"));
+        }
+        Ok(())
+    });
+    registration
+        .as_ref()
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
+
+    let devices = env
+        .devices()
+        .filter(|device| {
+            device
+                .ep()
+                .is_ok_and(|name| name == execution_provider_name)
+        })
+        .collect::<Vec<_>>();
+    if devices.is_empty() {
+        anyhow::bail!("{registration_name} EP registered but no matching device was found")
+    }
+    builder
+        .with_devices(devices, None)
+        .map_err(|e| anyhow::anyhow!("{}", e))?
+        .commit_from_file(model_path)
+        .map_err(|e| anyhow::anyhow!("{}", e))
+}
+
+#[cfg(feature = "migraphx")]
+fn migraphx_library_path(runtime_dir: &Path) -> PathBuf {
+    if let Ok(path) = std::env::var("GEMMA_MIGRAPHX_EP_LIBRARY") {
+        return PathBuf::from(path);
+    }
+    runtime_dir.join("migraphx/libmigraphx-ep.so")
+}
+
+#[cfg(feature = "webgpu")]
+fn webgpu_library_path(runtime_dir: &Path) -> PathBuf {
+    if let Ok(path) = std::env::var("GEMMA_WEBGPU_EP_LIBRARY") {
+        return PathBuf::from(path);
+    }
+    let filename = if cfg!(target_os = "windows") {
+        "onnxruntime_providers_webgpu.dll"
+    } else if cfg!(target_os = "macos") {
+        "libonnxruntime_providers_webgpu.dylib"
+    } else {
+        "libonnxruntime_providers_webgpu.so"
+    };
+    runtime_dir.join(filename)
 }
 
 /// Resolve model directory: src-tauri/models or project_root/models
@@ -234,11 +486,76 @@ pub fn resolve_model_dir() -> PathBuf {
     PathBuf::from("models")
 }
 
-#[cfg(test)]
+#[cfg(all(
+    test,
+    any(
+        feature = "migraphx",
+        all(target_os = "macos", target_arch = "aarch64", feature = "coreml")
+    )
+))]
 mod tests {
     use super::*;
 
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[cfg(feature = "migraphx")]
+    const IDENTITY_MODEL: &[u8] = &[
+        8, 8, 58, 59, 10, 16, 10, 1, 120, 18, 1, 121, 34, 8, 73, 100, 101, 110, 116, 105, 116, 121,
+        18, 5, 115, 109, 111, 107, 101, 90, 15, 10, 1, 120, 18, 10, 10, 8, 8, 1, 18, 4, 10, 2, 8,
+        1, 98, 15, 10, 1, 121, 18, 10, 10, 8, 8, 1, 18, 4, 10, 2, 8, 1, 66, 2, 16, 13,
+    ];
+
+    #[cfg(feature = "migraphx")]
+    #[test]
+    #[ignore = "requires ORT_DYLIB_PATH; run in a separate test process"]
+    fn migraphx_unavailable_falls_back_to_cpu() {
+        use ort::value::Tensor;
+        let root = std::env::temp_dir().join(format!("gemma-ep-fallback-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let model = root.join("identity.onnx");
+        std::fs::write(&model, IDENTITY_MODEL).unwrap();
+        let (mut session, provider) =
+            create_session(&model, &root.join("missing-runtime"), &[]).unwrap();
+        assert_eq!(provider, "CPU");
+        let input = Tensor::from_array(([1], vec![42_f32])).unwrap();
+        let output = session.run(ort::inputs![input]).unwrap();
+        assert_eq!(output[0].try_extract_tensor::<f32>().unwrap().1, &[42_f32]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "migraphx")]
+    #[test]
+    #[ignore = "requires the staged native MIGraphX bundle"]
+    fn migraphx_plugin_runtime_smoke() {
+        use ort::{environment::Environment, value::Tensor};
+        let runtime = PathBuf::from(std::env::var("GEMMA_PLUGIN_TEST_RUNTIME").unwrap());
+        assert!(ort::init_from(runtime.join("libonnxruntime.so"))
+            .unwrap()
+            .commit());
+        let env = Environment::current().unwrap();
+        if let Err(error) =
+            env.register_ep_library("MIGraphXExecutionProvider", migraphx_library_path(&runtime))
+        {
+            let message = error.to_string();
+            assert!(
+                message.contains("hipGetDeviceCount")
+                    && ["HIP failure 100:", "HIP failure 35:"]
+                        .iter()
+                        .any(|expected| message.contains(expected)),
+                "unexpected plugin registration failure: {message}"
+            );
+        }
+        // Enumerating devices must work even on CI runners without an AMD GPU.
+        let _devices = env.devices().collect::<Vec<_>>();
+        // A minimal float Identity graph exercises the same ORT core's CPU path.
+        let mut session = Session::builder()
+            .unwrap()
+            .commit_from_memory(IDENTITY_MODEL)
+            .unwrap();
+        let input = Tensor::from_array(([1], vec![42_f32])).unwrap();
+        let output = session.run(ort::inputs![input]).unwrap();
+        assert_eq!(output[0].try_extract_tensor::<f32>().unwrap().1, &[42_f32]);
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64", feature = "coreml"))]
     #[test]
     fn apple_silicon_build_includes_coreml() {
         use ort::ep::ExecutionProvider;

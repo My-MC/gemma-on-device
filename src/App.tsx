@@ -22,6 +22,7 @@ type GenerateResult = {
   tokens_per_sec: number;
   is_mock: boolean;
   model_id: string;
+  execution_provider: string;
   error?: string;
 };
 
@@ -35,6 +36,7 @@ type BenchResult = {
   avg_tokens_per_sec: number;
   total_tokens: number;
   is_mock: boolean;
+  execution_provider: string;
   timestamp: string;
 };
 
@@ -243,6 +245,8 @@ export default function App() {
   const [bench, setBench] = useState<BenchResult | null>(null);
   const [benchRunning, setBenchRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeRuntime, setActiveRuntime] = useState<string | null>(null);
+  const [listenersReady, setListenersReady] = useState(false);
 
   // Download state
   const [variant, setVariant] = useState("1b-int4");
@@ -264,6 +268,7 @@ export default function App() {
         ? { ...payload, text: partialText }
         : payload;
     setResult(finalResult);
+    setActiveRuntime(payload.is_mock ? "Mock" : payload.execution_provider);
     setIsGenerating(false);
     setIsStreaming(false);
   }, []);
@@ -282,6 +287,16 @@ export default function App() {
     let cancelled = false;
 
     const setup = async () => {
+      const runtimeUnlisten = await listen<string | null>(
+        "runtime-changed",
+        (event) => setActiveRuntime(event.payload),
+      );
+      if (cancelled) {
+        runtimeUnlisten();
+        return;
+      }
+      unlistenFns.push(runtimeUnlisten);
+
       const u1 = await listen<string>("token", (e) => {
         const next = [...streamTokensRef.current, e.payload];
         streamTokensRef.current = next;
@@ -289,6 +304,9 @@ export default function App() {
       });
       if (cancelled) {
         u1();
+        unlistenFns.forEach((fn) => {
+          fn();
+        });
         return;
       }
       unlistenFns.push(u1);
@@ -338,6 +356,7 @@ export default function App() {
         return;
       }
       unlistenFns.push(u4);
+      setListenersReady(true);
     };
     setup().catch((e) => {
       console.error("listener setup failed", e);
@@ -361,6 +380,7 @@ export default function App() {
     streamTokensRef.current = [];
     setIsGenerating(true);
     setIsStreaming(stream);
+    setActiveRuntime(null);
 
     const payload = {
       prompt,
@@ -381,6 +401,7 @@ export default function App() {
       }
     } catch (e) {
       setError(String(e));
+      setActiveRuntime(null);
       setIsGenerating(false);
       setIsStreaming(false);
     }
@@ -390,13 +411,16 @@ export default function App() {
     setBenchRunning(true);
     setBench(null);
     setError(null);
+    setActiveRuntime(null);
     try {
       const res = await invoke<BenchResult>("bench_inference", {
         iterations: 3,
       });
       setBench(res);
+      setActiveRuntime(res.is_mock ? "Mock" : res.execution_provider);
     } catch (e) {
       setError(String(e));
+      setActiveRuntime(null);
     } finally {
       setBenchRunning(false);
     }
@@ -444,15 +468,25 @@ export default function App() {
           </span>
         </div>
         <div className="header-badges">
+          <div className="runtime-status" role="status" aria-live="polite">
+            <span className="runtime-label">
+              {isGenerating || benchRunning
+                ? "実行中のランタイム"
+                : activeRuntime
+                  ? "前回のランタイム"
+                  : "ランタイム"}
+            </span>
+            <strong>
+              {activeRuntime === "Mock"
+                ? "モック"
+                : activeRuntime ||
+                  (isGenerating || benchRunning ? "準備中…" : "未実行")}
+            </strong>
+          </div>
           {system && (
-            <>
-              <span className="badge">
-                {system.platform}/{system.arch}
-              </span>
-              <span className="badge ort">
-                {system.ort_available ? "ort ✓" : "ort ✗"}
-              </span>
-            </>
+            <span className="badge">
+              {system.platform}/{system.arch}
+            </span>
           )}
           {primaryModel && (
             <span className={`badge ${primaryModel.exists ? "ok" : "warn"}`}>
@@ -477,9 +511,7 @@ export default function App() {
             </div>
             <div>
               <strong>ort</strong>{" "}
-              {system.ort_available
-                ? "available (CPU default, EPs via features)"
-                : "unavailable"}
+              {system.ort_available ? "available" : "unavailable"}
             </div>
           </div>
         </section>
@@ -651,7 +683,12 @@ export default function App() {
             <button
               type="button"
               className="primary"
-              disabled={isGenerating || !prompt.trim()}
+              disabled={
+                isGenerating ||
+                benchRunning ||
+                !listenersReady ||
+                !prompt.trim()
+              }
               onClick={() => handleGenerate(false)}
             >
               {isGenerating && !isStreaming ? "生成中…" : "生成 (一括)"}
@@ -659,7 +696,12 @@ export default function App() {
             <button
               type="button"
               className="primary outline"
-              disabled={isGenerating || !prompt.trim()}
+              disabled={
+                isGenerating ||
+                benchRunning ||
+                !listenersReady ||
+                !prompt.trim()
+              }
               onClick={() => handleGenerate(true)}
             >
               {isGenerating && isStreaming
@@ -669,7 +711,7 @@ export default function App() {
             <button
               type="button"
               className="small"
-              disabled={benchRunning}
+              disabled={benchRunning || isGenerating || !listenersReady}
               onClick={handleBench}
             >
               {benchRunning ? "計測中…" : "ベンチ実行"}
@@ -691,7 +733,8 @@ export default function App() {
             <div className="result">
               <div className="result-header">
                 <strong>
-                  {result.is_mock ? "MOCK" : "ort"} — {result.model_id}
+                  {result.is_mock ? "MOCK" : result.execution_provider} —{" "}
+                  {result.model_id}
                 </strong>
                 <span className="muted">
                   {result.prompt_tokens} + {result.generated_tokens} ={" "}
@@ -732,6 +775,9 @@ export default function App() {
             </div>
             <div>
               <strong>Platform</strong> {bench.platform}/{bench.arch}
+            </div>
+            <div>
+              <strong>EP</strong> {bench.execution_provider}
             </div>
             <div>
               <strong>Avg latency</strong> {bench.avg_latency_ms.toFixed(1)} ms
@@ -779,11 +825,6 @@ export default function App() {
             <code>bun run bench</code> — CLIベンチ
           </li>
         </ol>
-        <div className="ep-matrix">
-          <strong>EP matrix (ort features):</strong> Win: CPU/DirectML/CUDA ·
-          Mac: CPU/CoreML · Linux: CPU/CUDA · Android: CPU/NNAPI/XNNPACK · iOS:
-          CPU/CoreML
-        </div>
       </section>
 
       <footer className="footer muted">

@@ -25,7 +25,7 @@ futures = "0.3"
 # HTTP download for on-device model fetching (uses rustls to avoid extra openssl deps)
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 tokio-util = { version = "0.7", features = ["io"] }
-# ONNX Runtime wrapper - CPU default, EPs enabled via features
+# ONNX Runtime wrapper - CPU default, GPU builds load a pinned runtime at runtime.
 ort = { version = "2.0.0-rc.13", features = ["half"] }
 # Tokenizer for Gemma (SentencePiece)
 tokenizers = { version = "0.23", features = [] }
@@ -39,16 +39,19 @@ chrono = { version = "0.4", features = ["serde"] }
 [features]
 default = []
 # Execution Providers - enable per target
-cuda = ["ort/cuda"]
+cuda = ["ort/cuda", "load-dynamic"]
+migraphx = ["load-dynamic"]
+webgpu = []
+desktop-cuda = ["cuda", "webgpu"]
+desktop-coreml = ["coreml", "webgpu"]
+desktop-migraphx = ["migraphx", "webgpu"]
 tensorrt = ["ort/tensorrt"]
-coreml = ["ort/coreml"]
+coreml = ["ort/coreml", "load-dynamic"]
 directml = ["ort/directml"]
 nnapi = ["ort/nnapi"]
 xnnpack = ["ort/xnnpack"]
 # Dynamic loading of ONNX Runtime (avoids static linking, fixes Windows CRT mismatch)
 load-dynamic = ["ort/load-dynamic"]
 
-# Apple Silicon desktop builds include CoreML automatically. The explicit
-# `coreml` feature remains available for iOS and other Apple targets.
-[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
-ort = { version = "2.0.0-rc.13", features = ["half", "coreml"] }
+# Desktop runtime editions are mutually exclusive: each is packaged with a
+# matching ONNX Runtime binary and its provider dependencies.

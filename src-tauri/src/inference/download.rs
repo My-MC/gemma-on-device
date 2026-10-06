@@ -21,13 +21,19 @@ pub struct DownloadProgress {
 struct FileSpec {
     url_path: &'static str,
     dest_name: &'static str,
-    /// Expected SHA256 hex (lowercase). None = skip verification (placeholder).
     expected_sha256: Option<&'static str>,
 }
 
-/// SHA256 hashes verified against the HF API (`lfs.oid`) and cross-checked by
-/// downloading `onnx/model_q4.onnx` locally. See models/README.md for details.
 const SHA_1B_TOKENIZER: &str = "55da1312bdf1d7d8fe8d9d1b3eed04086261149e6034e0ac3f8c633b67f5aac8";
+const SHA_1B_INT4_ONNX: &str = "69686023e5892376e38fcbcdd0c77af432c55b3bcd03aee6d561bd1f04507da0";
+const SHA_1B_INT4_DATA: &str = "c2370070be257a98d50e17d81be13e18304c39e7e6d9d1416f8f883681d2a17b";
+
+pub async fn verify_default_model_files(model_dir: &Path) -> Result<()> {
+    verify_sha256(&model_dir.join("gemma-3-1b-it-int4.onnx"), SHA_1B_INT4_ONNX).await?;
+    verify_sha256(&model_dir.join("model_q4.onnx_data"), SHA_1B_INT4_DATA).await?;
+    verify_sha256(&model_dir.join("tokenizer.json"), SHA_1B_TOKENIZER).await?;
+    Ok(())
+}
 
 fn variant_specs(variant: &str) -> Result<(Vec<FileSpec>, &'static str)> {
     match variant {

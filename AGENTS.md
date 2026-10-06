@@ -93,6 +93,7 @@ Agents may work in a Git worktree. Each worktree is an isolated working director
 - **Tokenizers**: Downloading 3n replaces `tokenizer.json` with a different hash. Restore the 1B tokenizer with `bun run download:model:1b` before 1B inference; restart an app that already cached a session after replacing model files.
 - **3n download limitation**: The Rust downloader treats failed 3n `.onnx_data` downloads as optional and can emit `download-complete` for a partial download. The Bun downloader fails instead. Neither completion nor status proves 3n inference readiness.
 - **Runtime resources**: Windows builds stage `target/release/onnxruntime.dll` via `scripts/download_ort_dll.ts` and `tauri.windows.conf.json`. Default `beforeBuildCommand` runs DLL staging (a no-op outside Windows) and the frontend build. Linux/macOS builds use the linked runtime and have no DLL bundle resource.
+- **GPU runtime loading**: GPU editions bundle a dynamic runtime. CUDA bundles must place `onnxruntime_providers_shared.dll` / `libonnxruntime_providers_shared.so` beside the core and CUDA provider. Linux dependency preloading must exclude all `libonnxruntime*` libraries: loading providers before ORT initializes its host can crash the process. Preload dependencies from the selected core's parent directory.
 
 ## Context7 / Context-Mode (Mandatory)
 
@@ -106,6 +107,7 @@ Agents may work in a Git worktree. Each worktree is an isolated working director
 
 ## Mobile
 
+- Desktop editions use `bun run tauri:cuda`, `bun run tauri:migraphx`, or `bun run tauri:coreml`; `scripts/prepare_runtime.py` downloads SHA256-pinned packages and stages CUDA/cuBLAS or ROCm/MIGraphX user-space libraries under ignored `runtime-artifacts/`. Linux MIGraphX is a standalone plugin built from SHA256-pinned source against ORT 1.30.0; build dependencies include ROCm 7.2.1 development packages, CMake 4.2+, Ninja, patch, and patchelf. HIPRTC and GPU kernel data are bundled. CI uploads each built edition as a separate 7-day Actions artifact. Default remains CPU.
 - Generated Android/iOS projects are ignored and initialized with `bun run tauri android init` / `bun run tauri ios init`.
 - Android: `cargo ndk`, `aarch64-linux-android` etc.; iOS: `aarch64-apple-ios`
 - Mobile providers (`nnapi`, `xnnpack`, `coreml`) require explicit Cargo features; CoreML is not automatically enabled. iOS config sets minimum version 15.1 and a development team that must match the contributor's signing setup.

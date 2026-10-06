@@ -216,6 +216,7 @@ sha256sum models/tokenizer.json
 
 - Enter a prompt → **Generate (single)** calls `invoke("generate")`, **Generate (stream)** calls `invoke("generate_stream")` → `listen("token")` + `listen("generation-complete")` for incremental display (`src/App.tsx`)
 - **Run bench** → `bench_inference` shows `avg tok/s` / `avg latency`
+- The header shows the execution provider selected for the current generation or benchmark, updates when inference falls back to another provider, and distinguishes preparing, mock execution, and the last completed runtime. The static EP list at the bottom is removed.
 
 **CLI**:
 
@@ -226,22 +227,35 @@ bun run check:ort             # rustc/cargo/ort/models/tauri-cli diagnostics
 
 ### Build
 
+Desktop editions use `bun run tauri:cuda`, `bun run tauri:migraphx`, and `bun run tauri:coreml`. Each selects its primary execution provider and falls back to WebGPU, then CPU. `scripts/prepare_runtime.py` downloads SHA256-pinned upstream packages and stages the runtime libraries under ignored `runtime-artifacts/`; CI uploads each built edition as a separate 7-day Actions artifact.
+
 ```bash
 bun run build                 # TypeScript check + Vite frontend build
 bun run tauri build           # Tauri bundle (target/release/bundle, workspace root)
-# With execution provider
-bun run tauri build -- --features cuda
+# Separate desktop editions; each stages its pinned runtime before building
+bun run tauri:cuda       # Windows/Linux x64: CUDA → WebGPU → CPU
+bun run tauri:migraphx   # Linux x64: MIGraphX → WebGPU → CPU
+bun run tauri:coreml     # macOS 14+ Apple Silicon: CoreML → WebGPU → CPU
 ```
 
-On Apple Silicon Macs, `bun run tauri dev` and `bun run tauri build` include
-CoreML automatically. Inference requests CoreML's `CPUAndGPU` compute mode,
-uses MLProgram with FP16 GPU accumulation, and falls back to CPU for graph nodes
-that CoreML cannot execute. The community Gemma ONNX graph contains dynamic
-operations, so current profiling shows partial GPU offload rather than
-GPU-exclusive execution. Compiled CoreML graphs
-are cached in `models/.coreml-cache/` (or the app data model directory).
-Set `GEMMA_COREML_PROFILE=1` when launching the app to log CoreML's per-operator
-hardware assignment and estimated execution time for GPU diagnostics.
+CUDA uses ONNX Runtime 1.30.0, CUDA 13, and cuDNN 9. The CUDA edition bundles ONNX Runtime, WebGPU, cuBLAS, and other pinned NVIDIA user-space libraries. Users need a compatible NVIDIA GPU driver; the CUDA Toolkit is not required. Windows may also require the current Microsoft Visual C++ Redistributable x64.
+
+On WSL2, use the NVIDIA driver installed on Windows and confirm `nvidia-smi` works inside WSL. Launch the GUI from a WSLg terminal with `DISPLAY` configured; use the software-rendering environment variables above if needed. Linux preloads bundled dependency libraries from the selected ONNX Runtime directory, leaving provider loading to ONNX Runtime after initialization. CUDA packaging places the shared provider library beside the core and CUDA provider. Rebuild older CUDA bundles with `bun run tauri:cuda` to include this layout.
+
+To validate CUDA with the downloaded, SHA256-verified 1B model on Linux (including WSL2), run this smoke test separately from other runtime tests. It requires CUDA rather than accepting CPU fallback and checks streaming plus cached-session inference:
+
+```bash
+GEMMA_CUDA_TEST_RUNTIME="$PWD/runtime-artifacts/linux-x64/cuda" \
+GEMMA_CUDA_TEST_MODELS="$PWD/models" \
+cargo test --release --manifest-path src-tauri/Cargo.toml --features desktop-cuda \
+  cuda_real_inference_smoke -- --ignored --nocapture
+```
+
+The Linux AMD edition bundles the standalone [MIGraphX plugin EP](https://github.com/onnxruntime/onnxruntime-ep-amdgpu) and ROCm 7.2.1 user-space libraries. MIGraphX, WebGPU, and CPU use the same ONNX Runtime 1.30.0 process and cached inference session. Users need a compatible AMD GPU and kernel driver; ROCm and MIGraphX do not need to be installed separately. This project's AMD bundle currently targets Linux x64; the upstream plugin also has Windows build support.
+
+Building this edition requires ROCm 7.2.1 with `migraphx`, `migraphx-dev`, `hip-dev`, and AMD's `hipcc`, CMake 4.2+, Ninja, patch, and patchelf. `scripts/build_migraphx_plugin.py` builds the SHA256-pinned upstream source against the pinned ORT 1.30.0 SDK. The source revision is selected for ROCm 7.2.1 compatibility; upstream main can require newer MIGraphX APIs. A small Linux environment-helper patch is applied from `scripts/patches/`. Use the AMD ROCm repository's `hipcc` rather than Ubuntu's older package. The Debian installer declares the runtime's `libnuma`, `libelf`, and `libdrm` system dependencies so the package manager can resolve them. Packaging includes the HIPRTC driver, ROCm shared libraries and kernel data, and relocates their library search paths. Set `ROCM_PATH` if ROCm is installed outside `/opt/rocm`; `GEMMA_MIGRAPHX_EP_LIBRARY` overrides the plugin path for development.
+
+CoreML targets macOS 14 or newer on Apple Silicon. CoreML uses CPU and GPU where supported; unsupported graph nodes can fall back to CPU. Set `GEMMA_COREML_PROFILE=1` when launching the app to log per-operator hardware assignment. The WebGPU provider remains bundled in each GPU edition for fallback.
 
 Thresholds: desktop 5 tok/s / mobile 2 tok/s (INT4).
 
@@ -316,10 +330,9 @@ and 2–3 GB of working memory during inference.
 
 Execution providers in `src-tauri/Cargo.toml`:
 
-- Win: `directml` / `cuda` / `tensorrt`
-- Apple Silicon Mac: `coreml` is enabled automatically (GPU + CPU fallback)
-- Intel Mac: `coreml` (explicit Cargo feature)
-- Linux: `cuda`
+- Windows/Linux CUDA edition: `desktop-cuda`
+- Linux AMD edition: `desktop-migraphx` (standalone plugin EP with bundled ROCm user-space runtime)
+- Apple Silicon macOS edition: `desktop-coreml`
 - Android: `nnapi` / `xnnpack`
 - iOS: `coreml` requires an explicit Cargo feature (enabled in CI, GPU + CPU fallback)
 
@@ -347,6 +360,7 @@ Defined in `src-tauri/src/lib.rs:1`:
 | `bun run export:onnx` | `scripts/export_onnx.py` (`optimum-cli export onnx --quant int4`) |
 | `bun run bench` | `scripts/bench.ts`, always a mock loop; use app `bench_inference` for real measurements |
 | `bun run check:ort` | `scripts/check_ort.ts` environment diagnostics |
+| `bun run tauri:cuda` / `tauri:migraphx` / `tauri:coreml` | Download locked runtime packages, stage the edition libraries, and build its bundle |
 
 ## Development Workflow
 
