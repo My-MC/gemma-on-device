@@ -8,7 +8,20 @@
   background: rgb(0 0 0 / 55%);
 }
 
+.license-backdrop-dismiss {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  cursor: default;
+}
+
 .license-dialog {
+  position: relative;
+  z-index: 1;
   width: min(900px, 100%);
   max-height: min(780px, 90vh);
   display: flex;
@@ -30,8 +43,15 @@
   border-bottom: 1px solid var(--border);
 }
 
-.license-header h2 { margin: 0; font-size: 1.15rem; }
-.license-header p { margin: 5px 0 0; color: var(--text-muted); font-size: 0.8rem; }
+.license-header h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+.license-header p {
+  margin: 5px 0 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
 
 .license-toolbar {
   display: grid;
@@ -52,24 +72,103 @@
   border-radius: 7px;
 }
 
-.license-list { overflow: auto; padding: 8px 22px 20px; }
-.license-package { border-bottom: 1px solid var(--border); }
-.license-package summary { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 13px 2px; cursor: pointer; }
-.license-package-name { font-weight: 650; overflow-wrap: anywhere; }
-.license-package-name small { color: var(--text-muted); font-weight: 400; }
-.license-tags { display: flex; align-items: center; gap: 10px; color: var(--text-soft); font-size: 0.78rem; text-align: right; }
-.license-package-detail { padding: 0 4px 14px; }
-.license-package-detail p { font-size: 0.82rem; }
-.license-package-detail h3 { margin: 14px 0 6px; font-size: 0.8rem; color: var(--text-soft); }
-.license-package-detail pre { max-height: 280px; overflow: auto; padding: 12px; margin: 0; color: var(--text); background: var(--sunken); border: 1px solid var(--border); border-radius: 7px; white-space: pre-wrap; overflow-wrap: anywhere; font: 0.75rem/1.55 ui-monospace, monospace; }
-.license-empty { padding: 28px; color: var(--text-muted); text-align: center; }
-.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.license-list {
+  overflow: auto;
+  padding: 8px 22px 20px;
+}
+.license-package {
+  border-bottom: 1px solid var(--border);
+}
+.license-package summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 2px;
+  cursor: pointer;
+}
+.license-package-name {
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.license-package-name small {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.license-tags {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  text-align: right;
+}
+.license-package-detail {
+  padding: 0 4px 14px;
+}
+.license-package-detail p {
+  font-size: 0.82rem;
+}
+.license-package-detail h3 {
+  margin: 14px 0 6px;
+  font-size: 0.8rem;
+  color: var(--text-soft);
+}
+.license-package-detail pre {
+  max-height: 280px;
+  overflow: auto;
+  padding: 12px;
+  margin: 0;
+  color: var(--text);
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font:
+    0.75rem / 1.55 ui-monospace,
+    monospace;
+}
+.license-empty {
+  padding: 28px;
+  color: var(--text-muted);
+  text-align: center;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 
 @media (max-width: 600px) {
-  .license-backdrop { padding: 8px; }
-  .license-dialog { max-height: 96vh; }
-  .license-header, .license-list { padding-left: 14px; padding-right: 14px; }
-  .license-toolbar { grid-template-columns: 1fr; padding-left: 14px; padding-right: 14px; }
-  .license-package summary { align-items: flex-start; flex-direction: column; gap: 7px; }
-  .license-tags { text-align: left; }
+  .license-backdrop {
+    padding: 8px;
+  }
+  .license-dialog {
+    max-height: 96vh;
+  }
+  .license-header,
+  .license-list {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+  .license-toolbar {
+    grid-template-columns: 1fr;
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+  .license-package summary {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .license-tags {
+    text-align: left;
+  }
 }

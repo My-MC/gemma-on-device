@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
-import { mkdir, readFile, readdir, stat } from "node:fs/promises";
-import { basename, join, relative, resolve } from "node:path";
+import { mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { basename, join, relative, resolve } from "node:path";
 
 type CargoPackage = {
   id: string;
@@ -23,17 +23,34 @@ type LicenseEntry = {
   files: { name: string; text: string }[];
 };
 
+type RuntimeManifest = {
+  edition: string;
+  primary_ep_version?: string;
+  files: Record<string, string>;
+};
+
 const root = resolve(import.meta.dir, "..");
 const target = process.env.TAURI_ENV_TARGET_TRIPLE ?? rustHost();
-const edition = "default";
+const edition = process.env.GEMMA_RUNTIME_EDITION ?? "default";
+if (!["default", "cuda", "migraphx", "coreml"].includes(edition)) {
+  throw new Error(`Unsupported GEMMA_RUNTIME_EDITION: ${edition}`);
+}
 const entries: LicenseEntry[] = [];
 const failures: string[] = [];
-const spdxLicenses = createRequire(import.meta.url)("spdx-license-list/full") as Record<string, { name: string; url: string; licenseText: string }>;
+const spdxLicenses = createRequire(import.meta.url)(
+  "spdx-license-list/full",
+) as Record<string, { name: string; url: string; licenseText: string }>;
 
 function run(command: string[]): string {
-  const result = Bun.spawnSync(command, { cwd: root, stdout: "pipe", stderr: "pipe" });
+  const result = Bun.spawnSync(command, {
+    cwd: root,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
   if (result.exitCode !== 0) {
-    throw new Error(`${command.join(" ")} failed:\n${result.stderr.toString().trim()}`);
+    throw new Error(
+      `${command.join(" ")} failed:\n${result.stderr.toString().trim()}`,
+    );
   }
   return result.stdout.toString();
 }
@@ -52,14 +69,23 @@ function normalizedLicense(value: unknown): string {
 
 function addEntry(entry: LicenseEntry): void {
   if (!entry.license.trim()) {
-    failures.push(`${entry.ecosystem} ${entry.name}@${entry.version}: license identifier is missing`);
+    failures.push(
+      `${entry.ecosystem} ${entry.name}@${entry.version}: license identifier is missing`,
+    );
     return;
   }
-  if (entry.files.length === 0 || entry.files.every((file) => !file.text.trim())) {
-    failures.push(`${entry.ecosystem} ${entry.name}@${entry.version}: license text was not found`);
+  if (
+    entry.files.length === 0 ||
+    entry.files.every((file) => !file.text.trim())
+  ) {
+    failures.push(
+      `${entry.ecosystem} ${entry.name}@${entry.version}: license text was not found`,
+    );
     return;
   }
-  const uniqueFiles = new Map(entry.files.map((file) => [file.text.trim(), file]));
+  const uniqueFiles = new Map(
+    entry.files.map((file) => [file.text.trim(), file]),
+  );
   entries.push({ ...entry, files: [...uniqueFiles.values()] });
 }
 
@@ -74,32 +100,46 @@ async function generateJavaScript(): Promise<void> {
     "--customPath",
     customPath,
   ]);
-  const packages = JSON.parse(output) as Record<string, {
-    name?: string;
-    version?: string;
-    licenses?: unknown;
-    licenseFile?: string;
-    licenseText?: string;
-    repository?: string;
-  }>;
+  const packages = JSON.parse(output) as Record<
+    string,
+    {
+      name?: string;
+      version?: string;
+      licenses?: unknown;
+      licenseFile?: string;
+      licenseText?: string;
+      repository?: string;
+    }
+  >;
 
   for (const [key, pkg] of Object.entries(packages)) {
-    const [name, version] = key.lastIndexOf("@") > 0
-      ? [key.slice(0, key.lastIndexOf("@")), key.slice(key.lastIndexOf("@") + 1)]
-      : [key, "unknown"];
-    const text = pkg.licenseText && pkg.licenseText !== "none" ? pkg.licenseText : "";
+    const [name, version] =
+      key.lastIndexOf("@") > 0
+        ? [
+            key.slice(0, key.lastIndexOf("@")),
+            key.slice(key.lastIndexOf("@") + 1),
+          ]
+        : [key, "unknown"];
+    const text =
+      pkg.licenseText && pkg.licenseText !== "none" ? pkg.licenseText : "";
     addEntry({
       name: pkg.name ?? name,
       version: pkg.version ?? version,
       ecosystem: "JavaScript",
       license: normalizedLicense(pkg.licenses),
       ...(pkg.repository ? { repository: pkg.repository } : {}),
-      files: text ? [{ name: basename(pkg.licenseFile ?? "LICENSE"), text }] : [],
+      files: text
+        ? [{ name: basename(pkg.licenseFile ?? "LICENSE"), text }]
+        : [],
     });
   }
 }
 
-async function licenseFiles(directory: string, packageName: string, declaredFile: string | null): Promise<{ name: string; text: string }[]> {
+async function licenseFiles(
+  directory: string,
+  packageName: string,
+  declaredFile: string | null,
+): Promise<{ name: string; text: string }[]> {
   const paths = new Set<string>();
   if (declaredFile) paths.add(resolve(directory, declaredFile));
   for (const item of await readdir(directory)) {
@@ -112,38 +152,81 @@ async function licenseFiles(directory: string, packageName: string, declaredFile
   for (const path of paths) {
     try {
       const text = await readFile(path, "utf8");
-      if (text.trim()) found.push({ name: `${packageName}/${basename(path)}`, text });
+      if (text.trim())
+        found.push({ name: `${packageName}/${basename(path)}`, text });
     } catch {
-      failures.push(`Rust ${packageName}: declared license file could not be read (${relative(root, path)})`);
+      failures.push(
+        `Rust ${packageName}: declared license file could not be read (${relative(root, path)})`,
+      );
     }
   }
   return found;
 }
 
-async function generateRust(manifest: string, features: string[] = []): Promise<void> {
-  const selectedFeatures = [...features, ...(process.env.GEMMA_CARGO_FEATURES ?? "").split(/[\s,]+/).filter(Boolean)];
-  const metadata = JSON.parse(run([
-    "cargo", "metadata", "--format-version", "1", "--manifest-path", manifest,
-    "--filter-platform", target,
-    ...selectedFeatures.flatMap((feature) => ["--features", feature]),
-  ])) as { packages: CargoPackage[] };
+async function generateRust(
+  manifest: string,
+  features: string[] = [],
+): Promise<void> {
+  const environmentFeatures = (process.env.GEMMA_CARGO_FEATURES ?? "")
+    .split(/[\s,]+/)
+    .filter(Boolean);
+  const selectedFeatures = [...features, ...environmentFeatures];
+  const metadata = JSON.parse(
+    run([
+      "cargo",
+      "metadata",
+      "--format-version",
+      "1",
+      "--manifest-path",
+      manifest,
+      "--filter-platform",
+      target,
+      ...selectedFeatures.flatMap((feature) => ["--features", feature]),
+    ]),
+  ) as { packages: CargoPackage[] };
   const treeArgs = [
-    "cargo", "tree", "--manifest-path", manifest, "--target", target,
-    "--edges", "normal", "--prefix", "none", "--format", "{p}",
+    "cargo",
+    "tree",
+    "--manifest-path",
+    manifest,
+    "--target",
+    target,
+    "--edges",
+    "normal",
+    "--prefix",
+    "none",
+    "--format",
+    "{p}",
     ...selectedFeatures.flatMap((feature) => ["--features", feature]),
   ];
-  const selected = new Set(run(treeArgs).split("\n").map((line) => line.trim()).filter(Boolean));
+  const selected = new Set(
+    run(treeArgs)
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean),
+  );
 
   for (const pkg of metadata.packages) {
     if (!pkg.source || !selected.has(`${pkg.name} v${pkg.version}`)) continue;
     const directory = resolve(pkg.manifest_path, "..");
     const files = await licenseFiles(directory, pkg.name, pkg.license_file);
-    if (!files.some((file) => /(^|\/)(license|licence|copying)/i.test(file.name))) {
-      const identifiers = (pkg.license ?? "").match(/[A-Za-z0-9][A-Za-z0-9.+-]*/g) ?? [];
-      const licenseIds = [...new Set(identifiers.filter((id) => !["AND", "OR", "WITH"].includes(id)))];
+    if (
+      !files.some((file) => /(^|\/)(license|licence|copying)/i.test(file.name))
+    ) {
+      const identifiers =
+        (pkg.license ?? "").match(/[A-Za-z0-9][A-Za-z0-9.+-]*/g) ?? [];
+      const licenseIds = [
+        ...new Set(
+          identifiers.filter((id) => !["AND", "OR", "WITH"].includes(id)),
+        ),
+      ];
       for (const id of licenseIds) {
         const license = spdxLicenses[id];
-        if (license?.licenseText) files.push({ name: `SPDX/${id} (standard text)`, text: license.licenseText });
+        if (license?.licenseText)
+          files.push({
+            name: `SPDX/${id} (standard text)`,
+            text: license.licenseText,
+          });
       }
     }
     addEntry({
@@ -158,32 +241,85 @@ async function generateRust(manifest: string, features: string[] = []): Promise<
 }
 
 async function addRuntimeLicenses(): Promise<void> {
-  const platform = target.includes("windows") ? "win32"
-    : target.includes("apple-darwin") ? "darwin"
-      : target.includes("linux") ? "linux" : "";
-  const candidateDirs = platform === "win32" ? [join(root, "target/onnxruntime-extract-1.22.0")] : [];
-  for (const directory of candidateDirs) {
-    const exists = await stat(directory).then((info) => info.isDirectory()).catch(() => false);
-    if (!exists) continue;
-    const files = await listFiles(directory);
-    let licenseCount = 0;
-    for (const path of files) {
-      if (!/(licen[cs]e|copying|notice|third.party)/i.test(basename(path))) continue;
-      const text = await readFile(path, "utf8").catch(() => "");
-      if (!text.trim()) continue;
-      licenseCount++;
-      const segments = relative(directory, path).split(/[\\/]/);
+  const platform = target.includes("windows")
+    ? "win32"
+    : target.includes("apple-darwin")
+      ? "darwin"
+      : target.includes("linux")
+        ? "linux"
+        : "";
+  const ortExtract = join(root, "target/onnxruntime-extract-1.30.0");
+  const ortExtractExists = await stat(ortExtract)
+    .then((info) => info.isDirectory())
+    .catch(() => false);
+  if (edition === "default" && platform === "win32" && ortExtractExists) {
+    await addRuntimeDirectoryLicenses(ortExtract, "ONNX Runtime", "1.30.0");
+  }
+
+  if (edition !== "default") {
+    const runtimeDir = join(root, "runtime-artifacts/staged/ort-runtime");
+    const manifestPath = join(runtimeDir, "runtime-manifest.json");
+    const manifest = JSON.parse(
+      await readFile(manifestPath, "utf8"),
+    ) as RuntimeManifest;
+    if (manifest.edition !== edition) {
+      throw new Error(
+        `Staged runtime edition ${manifest.edition} does not match ${edition}`,
+      );
+    }
+    const licensePaths = Object.keys(manifest.files).filter((path) =>
+      /(licen[cs]e|copying|notice|third.party)/i.test(basename(path)),
+    );
+    if (licensePaths.length === 0) {
+      throw new Error(
+        `No license or notice files were found in the staged ${edition} runtime`,
+      );
+    }
+    for (const path of licensePaths) {
+      const text = await readFile(join(runtimeDir, path), "utf8").catch(
+        () => "",
+      );
+      if (!text.trim()) {
+        failures.push(
+          `Runtime ${edition}: license or notice text is empty (${path})`,
+        );
+        continue;
+      }
       entries.push({
-        name: "ONNX Runtime",
-        version: "1.22.0",
+        name: `${edition} runtime: ${path}`,
+        version: manifest.primary_ep_version ?? edition,
         ecosystem: "Runtime",
-        license: "See bundled license file",
-        files: [{ name: relative(directory, path), text }],
+        license: "See bundled license or notice file",
+        files: [{ name: path, text }],
       });
     }
-    if (licenseCount === 0) {
-      throw new Error(`No license files were found in staged ONNX Runtime files at ${directory}`);
-    }
+  }
+}
+
+async function addRuntimeDirectoryLicenses(
+  directory: string,
+  name: string,
+  version: string,
+): Promise<void> {
+  let licenseCount = 0;
+  for (const path of await listFiles(directory)) {
+    if (!/(licen[cs]e|copying|notice|third.party)/i.test(basename(path)))
+      continue;
+    const text = await readFile(path, "utf8").catch(() => "");
+    if (!text.trim()) continue;
+    licenseCount++;
+    entries.push({
+      name,
+      version,
+      ecosystem: "Runtime",
+      license: "See bundled license file",
+      files: [{ name: relative(directory, path), text }],
+    });
+  }
+  if (licenseCount === 0) {
+    throw new Error(
+      `No license files were found in staged runtime files at ${directory}`,
+    );
   }
 }
 
@@ -191,29 +327,46 @@ async function listFiles(directory: string): Promise<string[]> {
   const result: string[] = [];
   for (const item of await readdir(directory, { withFileTypes: true })) {
     const path = join(directory, item.name);
-    if (item.isDirectory()) result.push(...await listFiles(path));
+    if (item.isDirectory()) result.push(...(await listFiles(path)));
     else if (item.isFile()) result.push(path);
   }
   return result;
 }
 
 await generateJavaScript();
-await generateRust(join(root, "src-tauri/Cargo.toml"));
+await generateRust(
+  join(root, "src-tauri/Cargo.toml"),
+  edition === "default" ? [] : [`desktop-${edition}`],
+);
 await addRuntimeLicenses();
 
 if (failures.length) {
-  console.error("License generation stopped because required information is missing:");
+  console.error(
+    "License generation stopped because required information is missing:",
+  );
   for (const failure of failures) console.error(`- ${failure}`);
   process.exit(1);
 }
 
-entries.sort((a, b) => a.ecosystem.localeCompare(b.ecosystem) || a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
+entries.sort(
+  (a, b) =>
+    a.ecosystem.localeCompare(b.ecosystem) ||
+    a.name.localeCompare(b.name) ||
+    a.version.localeCompare(b.version),
+);
 const merged = new Map<string, LicenseEntry>();
 for (const entry of entries) {
   const key = `${entry.ecosystem}:${entry.name}@${entry.version}`;
   const existing = merged.get(key);
   if (existing) {
-    existing.files = [...new Map([...existing.files, ...entry.files].map((file) => [file.text.trim(), file])).values()];
+    existing.files = [
+      ...new Map(
+        [...existing.files, ...entry.files].map((file) => [
+          file.text.trim(),
+          file,
+        ]),
+      ).values(),
+    ];
     existing.repository ??= entry.repository;
   } else {
     merged.set(key, entry);
@@ -235,5 +388,11 @@ const packages = [...merged.values()].map(({ files, ...pkg }) => ({
     return { name, textId };
   }),
 }));
-await Bun.write(join(outputDir, "licenses.json"), JSON.stringify({ target, edition, packages, texts: sharedTexts }, null, 2) + "\n");
-console.log(`Generated license information for ${merged.size} packages (${edition}, ${target})`);
+await Bun.write(
+  join(outputDir, "licenses.json"),
+  JSON.stringify({ target, edition, packages, texts: sharedTexts }, null, 2) +
+    "\n",
+);
+console.log(
+  `Generated license information for ${merged.size} packages (${edition}, ${target})`,
+);

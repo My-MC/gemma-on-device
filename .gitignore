@@ -1,5 +1,8 @@
 /target
 /src-tauri/target
+/.cache
+__pycache__/
+/runtime-artifacts
 node_modules
 dist
 dist-ssr

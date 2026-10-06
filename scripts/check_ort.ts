@@ -27,7 +27,9 @@ async function main() {
   // Check src-tauri dependencies
   const cargoToml = await Bun.file("src-tauri/Cargo.toml").text();
   const ortMatch = cargoToml.match(/ort\s*=\s*\{[^}]*\}/);
-  console.log(`  ort: ${ortMatch ? ortMatch[0].slice(0, 80) + "..." : "not found"}`);
+  console.log(
+    `  ort: ${ortMatch ? `${ortMatch[0].slice(0, 80)}...` : "not found"}`,
+  );
 
   // Check model files
   const files = [
@@ -54,8 +56,9 @@ async function main() {
   try {
     const out = await Bun.$`bunx tauri --version`.text();
     console.log(`\n  tauri-cli: ${out.trim()}`);
-  } catch (e: any) {
-    console.warn(`\n  tauri-cli: not found (${e.message?.slice(0, 80)})`);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn(`\n  tauri-cli: not found (${message.slice(0, 80)})`);
   }
 
   console.log("\n  Next:");
