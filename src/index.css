@@ -4,6 +4,9 @@
 @import "@fontsource-variable/noto-sans-jp/wght.css";
 
 @custom-variant dark (&:is(.dark *));
+@custom-variant short-mobile (
+  @media (max-width: 760px) and (max-height: 720px)
+);
 
 @theme inline {
   --color-background: var(--background);
@@ -21,6 +24,19 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-outline: var(--outline);
+  --color-outline-variant: var(--outline-variant);
+  --color-surface-container-low: var(--surface-container-low);
+  --color-surface-container: var(--surface-container);
+  --color-surface-container-high: var(--surface-container-high);
+  --color-on-surface-variant: var(--on-surface-variant);
+  --color-success: var(--success);
+  --color-success-container: var(--success-container);
+  --color-warning: var(--warning);
+  --color-warning-container: var(--warning-container);
+  --color-status-success: var(--status-success);
+  --color-status-warning: var(--status-warning);
+  --color-status-error: var(--status-error);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -80,6 +96,17 @@
   --success-container: #b9f0ae;
   --warning: #785900;
   --warning-container: #ffe08a;
+  --status-success: color-mix(
+    in srgb,
+    var(--success-container) 52%,
+    var(--card)
+  );
+  --status-warning: color-mix(
+    in srgb,
+    var(--warning-container) 50%,
+    var(--card)
+  );
+  --status-error: color-mix(in srgb, var(--destructive) 12%, var(--card));
 
   font-family: var(--font-sans);
   color: var(--foreground);
@@ -133,52 +160,17 @@
   --success-container: #205021;
   --warning: #e8c35a;
   --warning-container: #574300;
-}
-
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
-
-body {
-  min-width: 320px;
-  min-height: 100vh;
-  margin: 0;
-  background: var(--background);
-}
-
-button,
-input,
-textarea {
-  font: inherit;
-}
-
-button {
-  cursor: pointer;
-}
-
-button:focus-visible,
-a:focus-visible,
-input:focus-visible,
-textarea:focus-visible {
-  outline: 3px solid var(--ring);
-  outline-offset: 2px;
-}
-
-::selection {
-  color: var(--primary-foreground);
-  background: var(--primary);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    scroll-behavior: auto;
-    animation-duration: 0.01ms;
-    transition-duration: 0.01ms;
-  }
+  --status-success: color-mix(
+    in srgb,
+    var(--success-container) 52%,
+    var(--card)
+  );
+  --status-warning: color-mix(
+    in srgb,
+    var(--warning-container) 50%,
+    var(--card)
+  );
+  --status-error: color-mix(in srgb, var(--destructive) 12%, var(--card));
 }
 
 .dark {
@@ -224,5 +216,20 @@ textarea:focus-visible {
   }
   html {
     @apply font-sans;
+  }
+  body {
+    @apply min-w-80 min-h-screen m-0 bg-background text-foreground;
+  }
+  button {
+    @apply cursor-pointer;
+  }
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible {
+    @apply outline-3 outline-ring outline-offset-2;
+  }
+  ::selection {
+    @apply bg-primary text-primary-foreground;
   }
 }
