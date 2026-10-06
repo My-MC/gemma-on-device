@@ -18,6 +18,7 @@ type KvCache = Vec<(Vec<f32>, Vec<f32>)>;
 pub struct GenerateOptions {
     pub prompt: String,
     pub max_tokens: Option<usize>,
+    pub context_length: Option<usize>,
     pub temperature: Option<f32>,
     pub use_chat_template: Option<bool>,
 }
@@ -37,7 +38,7 @@ pub struct GenerateResult {
 
 /// Core generation - if model not present, returns mock response for pipeline validation
 pub async fn generate_text(state: &AppState, opts: GenerateOptions) -> Result<GenerateResult> {
-    let max_tokens = opts.max_tokens.unwrap_or(128).min(512);
+    let max_tokens = opts.max_tokens.unwrap_or(super::limits::DEFAULT_MAX_TOKENS);
     let use_template = opts.use_chat_template.unwrap_or(true);
     let prompt = if use_template {
         apply_gemma_chat_template(&opts.prompt)
@@ -56,7 +57,7 @@ pub async fn generate_text(state: &AppState, opts: GenerateOptions) -> Result<Ge
 
     // Once model files exist, inference errors must be visible to the caller;
     // silently returning mock output makes a broken real setup look healthy.
-    try_real_inference(state, &prompt, max_tokens, None).await
+    try_real_inference(state, &prompt, max_tokens, opts.context_length, None).await
 }
 
 fn mock_generate(prompt: &str, max_tokens: usize) -> GenerateResult {
@@ -89,6 +90,7 @@ async fn try_real_inference(
     state: &AppState,
     prompt: &str,
     max_tokens: usize,
+    context_length: Option<usize>,
     emit: Option<&(dyn Fn(String) -> Result<()> + Send + Sync)>,
 ) -> Result<GenerateResult> {
     state.verify_default_model().await?;
@@ -99,6 +101,12 @@ async fn try_real_inference(
     let tokenizer = load_tokenizer(&tok_path)?;
     let input_ids = tokenizer.encode(prompt, true)?;
     let prompt_tokens = input_ids.len();
+    let max_tokens = super::limits::generation_budget(
+        prompt_tokens,
+        Some(max_tokens),
+        context_length,
+        Some(32768),
+    )?;
 
     // Load or reuse session
     let mut guard = state.session.lock().await;
@@ -310,7 +318,7 @@ pub async fn generate_stream(
     opts: GenerateOptions,
     emit: impl Fn(String) -> Result<()> + Send + Sync,
 ) -> Result<GenerateResult> {
-    let max_tokens = opts.max_tokens.unwrap_or(32).min(512);
+    let max_tokens = opts.max_tokens.unwrap_or(super::limits::DEFAULT_MAX_TOKENS);
     let model_path = state.default_model_path();
     let tok_path = state.default_tokenizer_path();
 
@@ -329,7 +337,7 @@ pub async fn generate_stream(
     } else {
         opts.prompt.clone()
     };
-    try_real_inference(state, &prompt, max_tokens, Some(&emit)).await
+    try_real_inference(state, &prompt, max_tokens, opts.context_length, Some(&emit)).await
 }
 
 #[cfg(test)]
@@ -357,6 +365,7 @@ mod tests {
         let opts = GenerateOptions {
             prompt: "こんにちは".to_string(),
             max_tokens: Some(8),
+            context_length: None,
             temperature: None,
             use_chat_template: Some(true),
         };
@@ -393,6 +402,7 @@ mod tests {
         let opts = GenerateOptions {
             prompt: "こんにちは".to_string(),
             max_tokens: Some(8),
+            context_length: None,
             temperature: None,
             use_chat_template: Some(true),
         };
@@ -412,6 +422,7 @@ mod tests {
         let opts = GenerateOptions {
             prompt: "こんにちは".to_string(),
             max_tokens: Some(8),
+            context_length: None,
             temperature: None,
             use_chat_template: Some(true),
         };

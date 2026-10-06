@@ -45,6 +45,7 @@ pub async fn run_bench(
         let options = GenerateOptions {
             prompt: prompt.to_string(),
             max_tokens: Some(32),
+            context_length: None,
             temperature: Some(0.0),
             use_chat_template: Some(true),
         };

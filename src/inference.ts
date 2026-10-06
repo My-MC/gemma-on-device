@@ -139,6 +139,7 @@ export async function generateLocalText(options: {
   model: LocalModel;
   prompt: string;
   maxTokens: number;
+  contextLength?: number;
   temperature: number;
   useChatTemplate?: boolean;
   stream?: boolean;
@@ -148,6 +149,7 @@ export async function generateLocalText(options: {
     options: {
       prompt: options.prompt,
       max_tokens: options.maxTokens,
+      context_length: options.contextLength,
       temperature: options.temperature,
       use_chat_template: options.useChatTemplate ?? true,
     },

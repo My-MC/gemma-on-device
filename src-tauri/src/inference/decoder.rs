@@ -378,7 +378,6 @@ pub(super) fn run(
     stream: bool,
 ) -> Result<GenerateResult> {
     let start = Instant::now();
-    let max_tokens = opts.max_tokens.unwrap_or(128).clamp(1, 512);
     let temperature = opts.temperature.unwrap_or(0.0);
     anyhow::ensure!(
         temperature.is_finite() && (0.0..=2.0).contains(&temperature),
@@ -393,6 +392,18 @@ pub(super) fn run(
     let mut ids: Vec<i64> = encoded.get_ids().iter().map(|&id| id as i64).collect();
     anyhow::ensure!(!ids.is_empty(), "Prompt contains no tokens");
     let prompt_tokens = ids.len();
+    let config = model.config.get("text_config").unwrap_or(&model.config);
+    let model_limit = ["max_position_embeddings", "n_positions", "n_ctx"]
+        .iter()
+        .filter_map(|key| config.get(key).and_then(Value::as_u64))
+        .min()
+        .and_then(|value| usize::try_from(value).ok());
+    let max_tokens = super::limits::generation_budget(
+        prompt_tokens,
+        opts.max_tokens,
+        opts.context_length,
+        model_limit,
+    )?;
     let tokenizer = model.tokenizer.clone();
     let mut decoder = tokenizer.decode_stream(true);
     let eos = eos_tokens(model);

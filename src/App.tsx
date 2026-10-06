@@ -130,7 +130,8 @@ export default function App() {
   const [prompt, setPrompt] = useState(
     "こんにちは！日本語で短く自己紹介してください。",
   );
-  const [maxTokens, setMaxTokens] = useState(128);
+  const [maxTokens, setMaxTokens] = useState(2048);
+  const [contextLength, setContextLength] = useState(4096);
   const [temperature, setTemperature] = useState(0.1);
   const [useChatTemplate, setUseChatTemplate] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -315,6 +316,7 @@ export default function App() {
           model: selectedHfModel,
           prompt,
           maxTokens,
+          contextLength,
           temperature,
           useChatTemplate,
           stream,
@@ -328,7 +330,13 @@ export default function App() {
         finalizeResult(generated);
         return;
       }
-      const payload = { prompt, maxTokens, temperature, useChatTemplate };
+      const payload = {
+        prompt,
+        maxTokens,
+        contextLength,
+        temperature,
+        useChatTemplate,
+      };
       const res = await invoke<GenerateResult>(
         stream ? "generate_stream_gemma" : "generate_gemma",
         payload,
@@ -362,6 +370,7 @@ export default function App() {
               model: selectedHfModel,
               prompt: "こんにちは。",
               maxTokens: 32,
+              contextLength,
               temperature: 0,
               useChatTemplate,
             }),
@@ -726,12 +735,27 @@ export default function App() {
                 ]}
               />
             </div>
+            <div className="select-field">
+              <span id="context-length-label">
+                コンテキスト長（入力＋出力）
+              </span>
+              <AppSelect
+                value={String(contextLength)}
+                onChange={(value) => setContextLength(Number(value))}
+                disabled={downloading || isGenerating || benchRunning}
+                labelId="context-length-label"
+                options={[
+                  { value: "2048", label: "2048トークン" },
+                  { value: "4096", label: "4096トークン（既定）" },
+                ]}
+              />
+            </div>
             <label>
-              Max tokens
+              最大生成トークン数
               <input
                 type="number"
-                min={16}
-                max={512}
+                min={1}
+                max={4096}
                 value={maxTokens}
                 onChange={(e) => setMaxTokens(Number(e.target.value))}
               />
@@ -757,6 +781,11 @@ export default function App() {
             </label>
           </div>
 
+          <div className="hint">
+            コンテキスト長は入力と生成の合計です。chat
+            templateも入力に含まれます。
+            生成は残りのトークン数とモデルの上限まで行い、終了トークンで停止します。
+          </div>
           <div className="actions">
             <button
               type="button"

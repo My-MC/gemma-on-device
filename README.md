@@ -238,6 +238,8 @@ sha256sum models/tokenizer.json
 
 ### Inference / Bench
 
+The context window defaults to **4096 tokens** and can be set to **2048** in the UI. It counts tokenized input (including the chat template) plus output. Generation defaults to **2048 new tokens**, with a configurable maximum of **4096**. The backend caps generation to the remaining window and the selected model's declared context capacity; an input that fills the window returns an error rather than being silently truncated. EOS may end generation earlier. API callers can supply `contextLength` alongside `maxTokens`, or `context_length` in `generate_hf` options. Larger windows retain more cache state and can increase device memory usage.
+
 **UI**:
 
 - Enter a prompt → generate with `generate_hf` for the selected model, listening to native `token` events for streaming. The `generate` / `generate_stream` commands also use LFM2.5 by default; explicit legacy commands are `generate_gemma` / `generate_stream_gemma`.

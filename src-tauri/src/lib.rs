@@ -52,6 +52,7 @@ async fn get_model_info(state: State<'_, AppState>) -> Result<Vec<ModelInfo>, St
 async fn generate_gemma(
     prompt: String,
     max_tokens: Option<usize>,
+    context_length: Option<usize>,
     temperature: Option<f32>,
     use_chat_template: Option<bool>,
     state: State<'_, AppState>,
@@ -60,6 +61,7 @@ async fn generate_gemma(
     let opts = GenerateOptions {
         prompt,
         max_tokens,
+        context_length,
         temperature,
         use_chat_template,
     };
@@ -73,6 +75,7 @@ async fn generate_stream_gemma(
     app: tauri::AppHandle,
     prompt: String,
     max_tokens: Option<usize>,
+    context_length: Option<usize>,
     temperature: Option<f32>,
     use_chat_template: Option<bool>,
     state: State<'_, AppState>,
@@ -81,6 +84,7 @@ async fn generate_stream_gemma(
     let opts = GenerateOptions {
         prompt,
         max_tokens,
+        context_length,
         temperature,
         use_chat_template,
     };
@@ -118,6 +122,7 @@ async fn generate(
     app: tauri::AppHandle,
     prompt: String,
     max_tokens: Option<usize>,
+    context_length: Option<usize>,
     temperature: Option<f32>,
     use_chat_template: Option<bool>,
     state: State<'_, AppState>,
@@ -128,6 +133,7 @@ async fn generate(
         GenerateOptions {
             prompt,
             max_tokens,
+            context_length,
             temperature,
             use_chat_template,
         },
@@ -142,6 +148,7 @@ async fn generate_stream(
     app: tauri::AppHandle,
     prompt: String,
     max_tokens: Option<usize>,
+    context_length: Option<usize>,
     temperature: Option<f32>,
     use_chat_template: Option<bool>,
     state: State<'_, AppState>,
@@ -152,6 +159,7 @@ async fn generate_stream(
         GenerateOptions {
             prompt,
             max_tokens,
+            context_length,
             temperature,
             use_chat_template,
         },

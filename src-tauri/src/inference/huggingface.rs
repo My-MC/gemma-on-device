@@ -587,6 +587,7 @@ mod tests {
             GenerateOptions {
                 prompt: "Say hello in one short sentence.".into(),
                 max_tokens: Some(16),
+                context_length: None,
                 temperature: Some(0.0),
                 use_chat_template: Some(true),
             },
@@ -639,6 +640,7 @@ mod tests {
             let opts = || GenerateOptions {
                 prompt: "Hello".into(),
                 max_tokens: Some(4),
+                context_length: None,
                 temperature: Some(0.0),
                 use_chat_template: Some(false),
             };
