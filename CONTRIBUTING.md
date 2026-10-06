@@ -204,6 +204,8 @@ Rules:
 
 ## Execution Providers
 
+Windows CUDA packaging uses NSIS `zlib` compression while retaining both MSI and NSIS artifacts. `scripts/prepare_runtime.py` moves Windows ORT core/provider DLLs to the runtime root before generating the hash manifest; do not retain duplicate originals or remove dependency DLLs/license files. Linux/macOS runtime layouts retain their versioned libraries. After changing runtime preparation, run `python3 -m unittest discover -s scripts -p test_prepare_runtime.py` (also run by CI). Verify CUDA/WebGPU inference on Windows after installation when validating a release; CI packaging alone does not establish GPU execution.
+
 - Providers in `src-tauri/Cargo.toml` are selected with Cargo features (`cuda`, `tensorrt`, `coreml`, `directml`, `nnapi`, `xnnpack`). Apple Silicon macOS builds include CoreML automatically with CPU fallback for unsupported nodes; other targets default to CPU unless configured.
 - Windows builds use `load-dynamic` and the SHA256-verified DLL staged by `scripts/download_ort_dll.ts`; Linux/macOS link the runtime. See `README.md` for provider details.
 
