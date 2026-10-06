@@ -46,7 +46,7 @@ export function LicenseDialog({ onClose }: { onClose: () => void }) {
     searchRef.current?.focus();
     const focusable = () =>
       dialog?.querySelectorAll<HTMLElement>(
-        "button, input, select, summary, a[href], [tabindex]:not([tabindex='-1'])",
+        "button, input, summary, a[href], [tabindex]:not([tabindex='-1'])",
       ) ?? [];
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -133,19 +133,19 @@ export function LicenseDialog({ onClose }: { onClose: () => void }) {
               onChange={(event) => setQuery(event.target.value)}
             />
           </label>
-          <label>
-            <span className="sr-only">環境を絞り込む</span>
-            <select
-              value={ecosystem}
-              onChange={(event) =>
-                setEcosystem(event.target.value as typeof ecosystem)
-              }
-            >
-              {ecosystems.map((item) => (
-                <option key={item}>{item}</option>
-              ))}
-            </select>
-          </label>
+          {/* Native GTK select popups cannot use the bundled Japanese webfont. */}
+          <fieldset className="license-ecosystems" aria-label="環境を絞り込む">
+            {ecosystems.map((item) => (
+              <button
+                key={item}
+                type="button"
+                aria-pressed={ecosystem === item}
+                onClick={() => setEcosystem(item)}
+              >
+                {item}
+              </button>
+            ))}
+          </fieldset>
         </div>
         <div className="license-list" aria-live="polite">
           {loadError && (

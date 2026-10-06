@@ -55,14 +55,13 @@
 
 .license-toolbar {
   display: grid;
-  grid-template-columns: 1fr 170px;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
   padding: 14px 22px;
   border-bottom: 1px solid var(--border);
 }
 
-.license-toolbar input,
-.license-toolbar select {
+.license-toolbar input {
   width: 100%;
   min-height: 38px;
   padding: 7px 10px;
@@ -72,8 +71,28 @@
   border: 1px solid var(--border-input);
   border-radius: 7px;
 }
-.license-toolbar option {
-  font-family: inherit;
+.license-ecosystems {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.license-ecosystems button {
+  min-height: 38px;
+  padding: 7px 10px;
+  font-size: 0.8rem;
+}
+.license-ecosystems button[aria-pressed="true"] {
+  color: var(--btn-primary-fg);
+  background: var(--btn-primary-bg);
+  border-color: var(--btn-primary-bg);
+}
+.license-ecosystems button:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
 }
 
 .license-list {
