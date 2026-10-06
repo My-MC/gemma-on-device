@@ -23,6 +23,7 @@
   position: relative;
   z-index: 1;
   width: min(900px, 100%);
+  height: min(780px, 90vh);
   max-height: min(780px, 90vh);
   display: flex;
   flex-direction: column;
@@ -110,6 +111,8 @@
 }
 
 .license-list {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 8px 24px 24px;
 }
@@ -190,6 +193,7 @@
     padding: 8px;
   }
   .license-dialog {
+    height: 96vh;
     max-height: 96vh;
   }
   .license-header,
