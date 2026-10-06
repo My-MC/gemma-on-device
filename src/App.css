@@ -322,6 +322,10 @@ select {
   background: var(--input-bg);
   color: inherit;
 }
+input,
+option {
+  font-family: inherit;
+}
 textarea {
   resize: vertical;
 }
@@ -615,4 +619,5 @@ code {
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 0.8em;
+  font-family: ui-monospace, "Noto Sans JP Variable", monospace;
 }

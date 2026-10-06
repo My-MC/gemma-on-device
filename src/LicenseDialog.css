@@ -66,10 +66,14 @@
   width: 100%;
   min-height: 38px;
   padding: 7px 10px;
+  font-family: inherit;
   color: var(--text);
   background: var(--input-bg);
   border: 1px solid var(--border-input);
   border-radius: 7px;
+}
+.license-toolbar option {
+  font-family: inherit;
 }
 
 .license-list {
@@ -127,6 +131,7 @@
   overflow-wrap: anywhere;
   font:
     0.75rem / 1.55 ui-monospace,
+    "Noto Sans JP Variable",
     monospace;
 }
 .license-empty {
