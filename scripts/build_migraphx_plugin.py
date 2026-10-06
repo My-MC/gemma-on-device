@@ -117,9 +117,11 @@ def build_plugin(lock: dict, cache: Path, destination: Path, fetch) -> Path:
         "-DUSE_AMDGPU=OFF", "-DUSE_MIGRAPHX=ON", "-DUSE_HIP=OFF", "-DUSE_DML=OFF",
         "-DCMAKE_INSTALL_RPATH=$ORIGIN/lib;$ORIGIN/..",
     ], check=True)
+    parallelism = os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL") or str(min(4, os.cpu_count() or 1))
+    print(f"Building MIGraphX plugin with {parallelism} parallel jobs", flush=True)
     subprocess.run([
         "cmake", "--build", str(build), "--target", "migraphx-ep", "--parallel",
-        os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL", "2"),
+        parallelism,
     ], check=True)
     library = next(build.rglob("libmigraphx-ep.so"))
     destination.mkdir(parents=True, exist_ok=True)

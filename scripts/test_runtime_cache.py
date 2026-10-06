@@ -3,8 +3,10 @@ import copy
 import hashlib
 import io
 import os
+import tarfile
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -76,6 +78,44 @@ class RuntimeCacheTests(unittest.TestCase):
                 self.assertNotEqual(plugin.plugin_cache_path(lock, self.root, rocm, patch_file), original)
             with patch.object(plugin.subprocess, "check_output", return_value="tool v2"):
                 self.assertNotEqual(plugin.plugin_cache_path(lock, self.root, rocm, patch_file), original)
+
+    def test_cold_build_uses_available_cpus_and_respects_override(self):
+        lock = runtime.LOCK
+        source = self.root / "source.zip"
+        with zipfile.ZipFile(source, "w") as archive:
+            archive.writestr(f"onnxruntime-ep-amdgpu-{lock['migraphx_plugin']['commit']}/LICENSE", "license")
+        sdk = self.root / "sdk.tar.gz"
+        with tarfile.open(sdk, "w:gz") as archive:
+            for folder in ("lib", "include"):
+                entry = tarfile.TarInfo(f"onnxruntime-linux-x64-{lock['ort']}/{folder}")
+                entry.type = tarfile.DIRTYPE
+                archive.addfile(entry)
+        rocm = self.root / "rocm"
+        (rocm / "lib/cmake/migraphx").mkdir(parents=True)
+
+        def fetch(package):
+            return source if package == lock["migraphx_plugin"]["source"] else sdk
+
+        def native_command(command, **kwargs):
+            if command[:2] == ["cmake", "--build"]:
+                build = Path(command[2])
+                build.mkdir(parents=True)
+                (build / "libmigraphx-ep.so").write_bytes(b"built plugin")
+
+        for index, (cpus, override, expected) in enumerate((
+            (8, "", "4"), (2, "", "2"), (None, "", "1"), (8, "3", "3"),
+        )):
+            with self.subTest(cpus=cpus, override=override), patch.dict(
+                os.environ, {"ROCM_PATH": str(rocm), "CMAKE_BUILD_PARALLEL_LEVEL": override}
+            ), patch.object(plugin.os, "cpu_count", return_value=cpus), patch.object(
+                plugin.shutil, "which", return_value="available"
+            ), patch.object(plugin.subprocess, "check_output", return_value="tool v1"), patch.object(
+                plugin.subprocess, "run", side_effect=native_command
+            ) as commands:
+                result = plugin.build_plugin(lock, self.root / str(index), self.root / f"out-{index}", fetch)
+                self.assertEqual(result.read_bytes(), b"built plugin")
+                build_command = commands.call_args_list[-1].args[0]
+                self.assertEqual(build_command[-2:], ["--parallel", expected])
 
     def test_verified_plugin_skips_native_build_and_rejects_corruption(self):
         source = self.root / "built"

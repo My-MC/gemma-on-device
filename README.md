@@ -259,6 +259,8 @@ The Linux AMD edition bundles the standalone [MIGraphX plugin EP](https://github
 
 Building this edition requires ROCm 7.2.1 with `migraphx`, `migraphx-dev`, `hip-dev`, and AMD's `hipcc`, CMake 4.2+, Ninja, patch, and patchelf. `scripts/build_migraphx_plugin.py` builds the SHA256-pinned upstream source against the pinned ORT 1.30.0 SDK. The source revision is selected for ROCm 7.2.1 compatibility; upstream main can require newer MIGraphX APIs. A small Linux environment-helper patch is applied from `scripts/patches/`. Use the AMD ROCm repository's `hipcc` rather than Ubuntu's older package. The Debian installer declares the runtime's `libnuma`, `libelf`, and `libdrm` system dependencies so the package manager can resolve them. Packaging includes the HIPRTC driver, ROCm shared libraries and kernel data, and relocates their library search paths. Set `ROCM_PATH` if ROCm is installed outside `/opt/rocm`; `GEMMA_MIGRAPHX_EP_LIBRARY` overrides the plugin path for development.
 
+The MIGraphX plugin's uncached C++ build uses the detected CPU count, capped at four parallel jobs to limit memory use. Set `CMAKE_BUILD_PARALLEL_LEVEL` to override this limit; the selected job count is printed in the build log. A verified compiled-plugin cache skips this build entirely.
+
 CoreML targets macOS 14 or newer on Apple Silicon. CoreML uses CPU and GPU where supported; unsupported graph nodes can fall back to CPU. Set `GEMMA_COREML_PROFILE=1` when launching the app to log per-operator hardware assignment. The WebGPU provider remains bundled in each GPU edition for fallback.
 
 Thresholds: desktop 5 tok/s / mobile 2 tok/s (INT4).
