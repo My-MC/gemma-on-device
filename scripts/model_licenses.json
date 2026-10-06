@@ -1,5 +1,19 @@
 [
   {
+    "name": "LFM2.5 350M Q4 (ONNX, default)",
+    "version": "2c07371c2e84776cad597f3d813b7d306d292aea",
+    "ecosystem": "Model",
+    "license": "LFM Open License v1.0",
+    "repository": "https://huggingface.co/onnx-community/LFM2.5-350M-ONNX",
+    "licenseUrl": "https://huggingface.co/LiquidAI/LFM2.5-350M/blob/main/LICENSE",
+    "files": [
+      {
+        "name": "LFM model license notice",
+        "text": "Base model: LiquidAI/LFM2.5-350M\nONNX model source: onnx-community/LFM2.5-350M-ONNX\n\nThis model is subject to the LFM Open License v1.0. Read the full, current license at the official link above."
+      }
+    ]
+  },
+  {
     "name": "Gemma 3 1B INT4 (ONNX)",
     "version": "",
     "ecosystem": "Model",

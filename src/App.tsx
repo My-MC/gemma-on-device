@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import {
+  DEFAULT_MODEL,
   discoverHuggingFaceModels,
   generateLocalText,
   LOCAL_MODELS,
@@ -285,10 +286,10 @@ export default function App() {
   const [showLicenses, setShowLicenses] = useState(false);
   const closeLicenses = useCallback(() => setShowLicenses(false), []);
   const [prompt, setPrompt] = useState(
-    "こんにちは！Gemmaのオンデバイス推論について教えて。",
+    "こんにちは！日本語で短く自己紹介してください。",
   );
   const [maxTokens, setMaxTokens] = useState(128);
-  const [temperature, setTemperature] = useState(0.7);
+  const [temperature, setTemperature] = useState(0.1);
   const [useChatTemplate, setUseChatTemplate] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -310,10 +311,10 @@ export default function App() {
     const stored = localStorage.getItem(HF_MODEL_KEY);
     return stored && hfAvailableModels.some((model) => model.id === stored)
       ? stored
-      : "lfm2.5-350m";
+      : DEFAULT_MODEL.id;
   });
   const [modelSelection, setModelSelection] = useState<"gemma" | "huggingface">(
-    "gemma",
+    "huggingface",
   );
   const [hfRepo, setHfRepo] = useState("");
   const [hfSearching, setHfSearching] = useState(false);
@@ -487,7 +488,7 @@ export default function App() {
       }
       const payload = { prompt, maxTokens, temperature, useChatTemplate };
       const res = await invoke<GenerateResult>(
-        stream ? "generate_stream" : "generate",
+        stream ? "generate_stream_gemma" : "generate_gemma",
         payload,
       );
       finalizeResult(res);
@@ -507,6 +508,11 @@ export default function App() {
     try {
       if (modelSelection === "huggingface") {
         await loadLocalModel(selectedHfModel, setHfStatus);
+        setHfReadyModels((previous) =>
+          previous.includes(selectedHfModel.id)
+            ? previous
+            : [...previous, selectedHfModel.id],
+        );
         const runs: GenerateResult[] = [];
         for (let i = 0; i < 3; i += 1) {
           runs.push(
@@ -545,6 +551,7 @@ export default function App() {
       }
       const res = await invoke<BenchResult>("bench_inference", {
         iterations: 3,
+        legacyGemma: true,
       });
       setBench(res);
       setActiveRuntime(res.is_mock ? "Mock" : res.execution_provider);
@@ -661,10 +668,21 @@ export default function App() {
               {system.platform}/{system.arch}
             </span>
           )}
-          {primaryModel && (
-            <span className={`badge ${primaryModel.exists ? "ok" : "warn"}`}>
-              {primaryModel.exists ? "model ✓" : "model ✗ (mock)"}
+          {modelSelection === "huggingface" ? (
+            <span
+              className={`badge ${hfReadyModels.includes(selectedHfModel.id) ? "ok" : "warn"}`}
+            >
+              {selectedHfModel.name} —
+              {hfReadyModels.includes(selectedHfModel.id)
+                ? " 準備済み"
+                : " 未準備"}
             </span>
+          ) : (
+            primaryModel && (
+              <span className={`badge ${primaryModel.exists ? "ok" : "warn"}`}>
+                {primaryModel.exists ? "model ✓" : "model ✗ (mock)"}
+              </span>
+            )
           )}
         </div>
       </header>
@@ -691,8 +709,82 @@ export default function App() {
       )}
 
       <section className="card">
+        <div className="card-title">ONNXモデル — 既定: LFM2.5 350M Q4</div>
+        <p className="muted">
+          Hugging Faceの公開ONNXモデルを取得し、Rustのortで推論します。
+          モデルのcommitとSHA256を確認し、選択したグラフの入力形式を検査します。
+        </p>
+        <div className="custom-model-controls">
+          <input
+            type="text"
+            value={hfRepo}
+            onChange={(event) => setHfRepo(event.target.value)}
+            placeholder="onnx-community/Qwen3-0.6B-ONNX またはモデルURL"
+            disabled={hfSearching || downloading}
+            aria-label="Hugging Face repository"
+          />
+          <button
+            type="button"
+            className="secondary"
+            onClick={handleDiscoverHfModel}
+            disabled={hfSearching || downloading || !hfRepo.trim()}
+          >
+            {hfSearching ? "検索中…" : "検索して追加"}
+          </button>
+        </div>
+        {hfRepoError && <div className="error">{hfRepoError}</div>}
+        <div className="custom-model-runtime">
+          <label>
+            ONNXモデル
+            <select
+              value={hfModelId}
+              onChange={(event) => {
+                setHfModelId(event.target.value);
+                setModelSelection("huggingface");
+              }}
+              disabled={hfSearching || isGenerating || downloading}
+            >
+              {hfAvailableModels.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.name} ({model.dtype.toUpperCase()}) — {model.graph}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="primary outline"
+            onClick={handlePrepareHfModel}
+            disabled={
+              hfSearching || downloading || isGenerating || benchRunning
+            }
+          >
+            {hfReadyModels.includes(selectedHfModel.id)
+              ? "モデルを読み込む"
+              : "ダウンロードして準備"}
+          </button>
+        </div>
+        {selectedHfModel.custom && (
+          <div className="muted model-revision">
+            Revision: <code>{selectedHfModel.revision}</code>
+          </div>
+        )}
+        {hfStatus && (
+          <div className="muted" role="status">
+            {hfStatus}
+          </div>
+        )}
+        {hfModelError && <div className="error">{hfModelError}</div>}
+        <div className="hint">
+          モデルはアプリのモデル保存領域へ保存されます。初回取得後はオフラインでも実行できます。
+          推論にはネイティブONNX
+          Runtimeを使い、利用可能なGPUプロバイダーまたはCPUで実行します。
+        </div>
+      </section>
+
+      <section className="card">
         <div className="card-title row-between">
-          <span>Models — Gemma モバイル向け (INT4推奨)</span>
+          <span>旧モデル — Gemma 3 / 3n</span>
           <button type="button" className="small" onClick={refreshModels}>
             更新
           </button>
@@ -802,82 +894,8 @@ export default function App() {
         </div>
 
         <div className="hint">
-          CLI: <code>bun run download:model</code>{" "}
+          CLI: <code>bun run download:model:1b</code>{" "}
           でも取得可。配置前はモック推論でUI/パイプラインを検証できます。
-        </div>
-      </section>
-
-      <section className="card">
-        <div className="card-title">Hugging Face — 追加ONNXモデル</div>
-        <p className="muted">
-          Hugging Faceの公開ONNXモデルを取得し、Rustのortで推論します。
-          モデルのcommitとSHA256を確認し、選択したグラフの入力形式を検査します。
-        </p>
-        <div className="custom-model-controls">
-          <input
-            type="text"
-            value={hfRepo}
-            onChange={(event) => setHfRepo(event.target.value)}
-            placeholder="onnx-community/Qwen3-0.6B-ONNX またはモデルURL"
-            disabled={hfSearching || downloading}
-            aria-label="Hugging Face repository"
-          />
-          <button
-            type="button"
-            className="secondary"
-            onClick={handleDiscoverHfModel}
-            disabled={hfSearching || downloading || !hfRepo.trim()}
-          >
-            {hfSearching ? "検索中…" : "検索して追加"}
-          </button>
-        </div>
-        {hfRepoError && <div className="error">{hfRepoError}</div>}
-        <div className="custom-model-runtime">
-          <label>
-            ONNXモデル
-            <select
-              value={hfModelId}
-              onChange={(event) => {
-                setHfModelId(event.target.value);
-                setModelSelection("huggingface");
-              }}
-              disabled={hfSearching || isGenerating || downloading}
-            >
-              {hfAvailableModels.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.name} ({model.dtype.toUpperCase()}) — {model.graph}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            className="primary outline"
-            onClick={handlePrepareHfModel}
-            disabled={
-              hfSearching || downloading || isGenerating || benchRunning
-            }
-          >
-            {hfReadyModels.includes(selectedHfModel.id)
-              ? "モデルを読み込む"
-              : "ダウンロードして準備"}
-          </button>
-        </div>
-        {selectedHfModel.custom && (
-          <div className="muted model-revision">
-            Revision: <code>{selectedHfModel.revision}</code>
-          </div>
-        )}
-        {hfStatus && (
-          <div className="muted" role="status">
-            {hfStatus}
-          </div>
-        )}
-        {hfModelError && <div className="error">{hfModelError}</div>}
-        <div className="hint">
-          モデルはアプリのモデル保存領域へ保存されます。初回取得後はオフラインでも実行できます。
-          推論にはネイティブONNX
-          Runtimeを使い、利用可能なGPUプロバイダーまたはCPUで実行します。
         </div>
       </section>
 
@@ -908,8 +926,10 @@ export default function App() {
                   )
                 }
               >
-                <option value="gemma">既定のGemma 3</option>
-                <option value="huggingface">選択したHugging Face ONNX</option>
+                <option value="huggingface">
+                  選択したONNX（既定: LFM2.5）
+                </option>
+                <option value="gemma">旧モデル: Gemma 3 1B</option>
               </select>
             </label>
             <label>
@@ -1074,8 +1094,9 @@ export default function App() {
             <code>bun install</code> — 依存取得
           </li>
           <li>
-            画面の「モデルをダウンロード」または{" "}
-            <code>bun run download:model</code> — Gemma 1B INT4 + tokenizer 取得
+            画面の「ダウンロードして準備」または{" "}
+            <code>bun run download:model</code> — LFM2.5 350M Q4 + tokenizer
+            取得
           </li>
           <li>
             <code>bun run dev</code> — Viteのみ (ブラウザ確認)

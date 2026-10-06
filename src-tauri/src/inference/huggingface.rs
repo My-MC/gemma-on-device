@@ -19,6 +19,12 @@ pub struct ModelSource {
     pub dtype: String,
 }
 
+pub fn default_source() -> Result<ModelSource> {
+    Ok(serde_json::from_str(include_str!(
+        "../../../src/default-model.json"
+    ))?)
+}
+
 impl ModelSource {
     fn validate(&self) -> Result<()> {
         validate_repo(&self.repo)?;
@@ -568,14 +574,12 @@ mod tests {
     #[tokio::test]
     #[ignore = "downloads the real LFM2.5 350M Q4 model (about 280 MB)"]
     async fn lfm_hf_native_smoke() -> Result<()> {
-        let root = std::env::temp_dir().join("gemma-ort-lfm-native-smoke");
+        let existing = std::env::var_os("GEMMA_SMOKE_MODEL_DIR").map(PathBuf::from);
+        let root = existing
+            .clone()
+            .unwrap_or_else(|| std::env::temp_dir().join("gemma-ort-lfm-native-smoke"));
         let state = AppState::new(root.clone(), root.join("runtime"));
-        let source = ModelSource {
-            repo: "onnx-community/LFM2.5-350M-ONNX".into(),
-            revision: "2c07371c2e84776cad597f3d813b7d306d292aea".into(),
-            graph: "onnx/model_q4.onnx".into(),
-            dtype: "q4".into(),
-        };
+        let source = default_source()?;
         let directory = ensure_files(None, &state, &source).await?;
         let mut model = load(&directory, &source, &state.runtime_dir)?;
         let result = decoder::run(
@@ -598,7 +602,9 @@ mod tests {
             "LFM native ort / {}: {} tokens; {:?}",
             result.execution_provider, result.generated_tokens, result.text
         );
-        tokio::fs::remove_dir_all(root).await?;
+        if existing.is_none() {
+            tokio::fs::remove_dir_all(root).await?;
+        }
         Ok(())
     }
 

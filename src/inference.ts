@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import defaultModel from "./default-model.json";
 
 export const MODEL_DTYPES = [
   "fp32",
@@ -41,17 +42,13 @@ export type NativeGenerationResult = {
   execution_provider: string;
 };
 
+export const DEFAULT_MODEL: LocalModel = {
+  ...defaultModel,
+  dtype: defaultModel.dtype as ModelDType,
+};
+
 export const LOCAL_MODELS: LocalModel[] = [
-  {
-    id: "lfm2.5-350m",
-    repo: "onnx-community/LFM2.5-350M-ONNX",
-    revision: "2c07371c2e84776cad597f3d813b7d306d292aea",
-    graph: "onnx/model_q4.onnx",
-    dtype: "q4",
-    name: "LFM2.5 350M",
-    size: "約280 MB",
-    description: "KVキャッシュと畳み込み状態を使う軽量モデル。",
-  },
+  DEFAULT_MODEL,
   {
     id: "lfm2.5-1.2b",
     repo: "LiquidAI/LFM2.5-1.2B-Instruct-ONNX",
