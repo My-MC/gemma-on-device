@@ -8,6 +8,7 @@ This file defines repository-specific operational rules for agents/contributors 
 - **Package name**: `gemma-on-device` / **identifier**: `com.gemmaondevice.app` / **productName**: `Gemma On Device`
 - **Workspace**: root `Cargo.toml` contains the `src-tauri` crate.
 - **Default model**: LFM2.5 350M Q4. `src/default-model.json` is the shared UI/backend/CLI definition with pinned revision and SHA256. Gemma 3 is an explicit legacy option.
+- **Initial catalog**: show LFM2.5, Qwen3, Bonsai, and SmolLM3 before repeat variants of a series. Keep legacy Gemma controls collapsed; catalog cards and the selector share `LOCAL_MODELS` in `src/inference.ts`.
 
 ## Tech Stack
 

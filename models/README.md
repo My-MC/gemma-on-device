@@ -2,6 +2,20 @@
 
 ONNX models for native Rust `ort` inference. The default is **LFM2.5 350M Q4**, released in March 2026, supporting Japanese, and about 280 MB for external weights.
 
+## Initial catalog
+
+The first cards offer different model series rather than several Gemma variants. A card selects the model used for download/preparation, inference, and benchmarks. The existing repository selector also supports added models.
+
+| Model | ONNX repository | Q4 download size |
+| --- | --- | --- |
+| LFM2.5 350M (default) | `onnx-community/LFM2.5-350M-ONNX` | about 280 MB |
+| Qwen3 0.6B | `onnx-community/Qwen3-0.6B-ONNX` | about 920 MB |
+| Bonsai 1.7B | `onnx-community/Bonsai-1.7B-ONNX` | about 1.1 GB |
+| SmolLM3 3B | `HuggingFaceTB/SmolLM3-3B-ONNX` | about 2.7 GB |
+| LFM2.5 1.2B Instruct | `LiquidAI/LFM2.5-1.2B-Instruct-ONNX` | about 760 MB |
+
+The SmolLM3 graph is pinned to `af50613703fb6f10ffcb21b27ad48edcb8334232`, with graph SHA256 `bbb931d4f86cd3159af7de66a591b2263acccf80eb938c05dd89fff22baf051d` and external weight SHA256 `0f0210cbef6a3eea54d19adff2d25e1626bce4ae5f22c34b9bd3067b1417a488`. Its `input_ids`, masks, positions, `past_key_values.*`, `logits`, and `present.*` schema was checked against the native decoder. Real SmolLM3 inference has not been exercised; allow for its larger download and device memory requirements. Its source declares Apache-2.0. Legacy Gemma controls are collapsed in a separate compatibility section.
+
 ## Default model
 
 Source: `onnx-community/LFM2.5-350M-ONNX`, commit `2c07371c2e84776cad597f3d813b7d306d292aea`, graph `onnx/model_q4.onnx`. `src/default-model.json` is shared by the UI, native backend, and Bun downloader. Run `bun run download:model` or use **ダウンロードして準備** on the first model card. Generation and benchmarking use LFM2.5 on first launch. Other ONNX selections are remembered.

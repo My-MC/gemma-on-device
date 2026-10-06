@@ -14,6 +14,62 @@
     ]
   },
   {
+    "name": "Qwen3 0.6B Q4 (ONNX)",
+    "version": "da1453100cf3ff33ef56d17983fc7a8648706db6",
+    "ecosystem": "Model",
+    "license": "Apache-2.0",
+    "repository": "https://huggingface.co/onnx-community/Qwen3-0.6B-ONNX",
+    "licenseUrl": "https://huggingface.co/Qwen/Qwen3-0.6B/blob/main/LICENSE",
+    "files": [
+      {
+        "name": "Model license notice",
+        "text": "Base model: Qwen/Qwen3-0.6B\nONNX model source: onnx-community/Qwen3-0.6B-ONNX\n\nThis model is subject to Apache-2.0. Read the full license at the official link above."
+      }
+    ]
+  },
+  {
+    "name": "Bonsai 1.7B Q4 (ONNX)",
+    "version": "3f3cf1759daf66342d26610488b9931f2fafcb29",
+    "ecosystem": "Model",
+    "license": "Apache-2.0",
+    "repository": "https://huggingface.co/onnx-community/Bonsai-1.7B-ONNX",
+    "licenseUrl": "https://huggingface.co/prism-ml/Bonsai-1.7B-unpacked/blob/main/LICENSE",
+    "files": [
+      {
+        "name": "Model license notice",
+        "text": "Base model: prism-ml/Bonsai-1.7B-unpacked\nONNX model source: onnx-community/Bonsai-1.7B-ONNX\n\nThis model is subject to Apache-2.0. Read the full license at the official link above."
+      }
+    ]
+  },
+  {
+    "name": "SmolLM3 3B Q4 (ONNX)",
+    "version": "af50613703fb6f10ffcb21b27ad48edcb8334232",
+    "ecosystem": "Model",
+    "license": "Apache-2.0",
+    "repository": "https://huggingface.co/HuggingFaceTB/SmolLM3-3B-ONNX",
+    "licenseUrl": "https://huggingface.co/HuggingFaceTB/SmolLM3-3B/blob/main/LICENSE",
+    "files": [
+      {
+        "name": "Model license notice",
+        "text": "Base model: HuggingFaceTB/SmolLM3-3B\nONNX model source: HuggingFaceTB/SmolLM3-3B-ONNX\n\nThis model is subject to Apache-2.0. Read the full license at the official link above."
+      }
+    ]
+  },
+  {
+    "name": "LFM2.5 1.2B Instruct Q4 (ONNX)",
+    "version": "10f72e70abf67ac0fd7ebf15bc5854726891d864",
+    "ecosystem": "Model",
+    "license": "LFM Open License v1.0",
+    "repository": "https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-ONNX",
+    "licenseUrl": "https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct/blob/main/LICENSE",
+    "files": [
+      {
+        "name": "Model license notice",
+        "text": "Base model: LiquidAI/LFM2.5-1.2B-Instruct\nONNX model source: LiquidAI/LFM2.5-1.2B-Instruct-ONNX\n\nThis model is subject to LFM Open License v1.0. Read the full license at the official link above."
+      }
+    ]
+  },
+  {
     "name": "Gemma 3 1B INT4 (ONNX)",
     "version": "",
     "ecosystem": "Model",

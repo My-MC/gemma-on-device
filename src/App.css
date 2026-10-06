@@ -239,6 +239,29 @@
   border-color: var(--missing-border);
   background: var(--missing-bg);
 }
+.catalog-grid {
+  margin: 0 0 16px;
+  padding: 0;
+  border: 0;
+  min-inline-size: 0;
+}
+button.catalog-model {
+  display: block;
+  text-align: left;
+  color: var(--text);
+  white-space: normal;
+}
+button.catalog-model.selected {
+  border-color: var(--exists-border);
+  background: var(--exists-bg);
+}
+.legacy-models > summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+.legacy-models[open] > summary {
+  margin-bottom: 16px;
+}
 .model-id {
   font-weight: 700;
   font-size: 0.9rem;
@@ -274,6 +297,7 @@
   color: var(--warn-fg);
 }
 .model-desc {
+  display: block;
   font-size: 0.8rem;
   color: var(--text-subtle);
 }

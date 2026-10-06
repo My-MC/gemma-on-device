@@ -50,16 +50,6 @@ export const DEFAULT_MODEL: LocalModel = {
 export const LOCAL_MODELS: LocalModel[] = [
   DEFAULT_MODEL,
   {
-    id: "lfm2.5-1.2b",
-    repo: "LiquidAI/LFM2.5-1.2B-Instruct-ONNX",
-    revision: "10f72e70abf67ac0fd7ebf15bc5854726891d864",
-    graph: "onnx/model_q4.onnx",
-    dtype: "q4",
-    name: "LFM2.5 1.2B Instruct",
-    size: "約760 MB",
-    description: "指示追従向けLFM2.5。ネイティブortで実行。",
-  },
-  {
     id: "qwen3-0.6b",
     repo: "onnx-community/Qwen3-0.6B-ONNX",
     revision: "da1453100cf3ff33ef56d17983fc7a8648706db6",
@@ -78,6 +68,26 @@ export const LOCAL_MODELS: LocalModel[] = [
     name: "Bonsai 1.7B",
     size: "約1.1 GB",
     description: "Bonsai Q4量子化。",
+  },
+  {
+    id: "smollm3-3b",
+    repo: "HuggingFaceTB/SmolLM3-3B-ONNX",
+    revision: "af50613703fb6f10ffcb21b27ad48edcb8334232",
+    graph: "onnx/model_q4.onnx",
+    dtype: "q4",
+    name: "SmolLM3 3B",
+    size: "約2.7 GB",
+    description: "Hugging Face製の指示追従モデル。メモリに余裕のある端末向け。",
+  },
+  {
+    id: "lfm2.5-1.2b",
+    repo: "LiquidAI/LFM2.5-1.2B-Instruct-ONNX",
+    revision: "10f72e70abf67ac0fd7ebf15bc5854726891d864",
+    graph: "onnx/model_q4.onnx",
+    dtype: "q4",
+    name: "LFM2.5 1.2B Instruct",
+    size: "約760 MB",
+    description: "指示追従向けLFM2.5。ネイティブortで実行。",
   },
 ];
 

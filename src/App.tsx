@@ -714,6 +714,43 @@ export default function App() {
           Hugging Faceの公開ONNXモデルを取得し、Rustのortで推論します。
           モデルのcommitとSHA256を確認し、選択したグラフの入力形式を検査します。
         </p>
+        <fieldset
+          className="model-grid catalog-grid"
+          aria-label="推論モデル一覧"
+        >
+          {LOCAL_MODELS.map((model) => {
+            const selected =
+              modelSelection === "huggingface" && hfModelId === model.id;
+            return (
+              <button
+                type="button"
+                key={model.id}
+                className={`model-card catalog-model ${selected ? "selected" : ""}`}
+                aria-pressed={selected}
+                disabled={
+                  hfSearching || downloading || isGenerating || benchRunning
+                }
+                onClick={() => {
+                  setHfModelId(model.id);
+                  setModelSelection("huggingface");
+                  setHfModelError(null);
+                  setHfStatus(null);
+                }}
+              >
+                <span className="model-id">{model.name}</span>
+                <span className="model-meta">
+                  <span className="pill">{model.dtype.toUpperCase()}</span>
+                  <span className="muted">{model.size}</span>
+                  {model.id === DEFAULT_MODEL.id && (
+                    <span className="pill ok">既定</span>
+                  )}
+                  {selected && <span className="pill ok">選択中</span>}
+                </span>
+                <span className="model-desc">{model.description}</span>
+              </button>
+            );
+          })}
+        </fieldset>
         <div className="custom-model-controls">
           <input
             type="text"
@@ -774,128 +811,41 @@ export default function App() {
             {hfStatus}
           </div>
         )}
+        {downloadEntries.length > 0 && (
+          <div className="download-progress">
+            {downloadEntries.map((p) => (
+              <div key={p.file} className="dl-row">
+                <div className="dl-file">
+                  <strong>{p.file}</strong>
+                  <span className="muted">
+                    {formatBytes(p.downloaded)}{" "}
+                    {p.total ? `/ ${formatBytes(p.total)}` : ""}{" "}
+                    {p.percent != null ? `· ${p.percent.toFixed(1)}%` : ""}
+                  </span>
+                  {p.done && !p.error && <span className="pill ok">done</span>}
+                  {p.error && <span className="pill warn">error</span>}
+                </div>
+                <div className="progress-bar">
+                  <div
+                    className="progress-fill"
+                    style={{ width: `${p.percent ?? (p.done ? 100 : 0)}%` }}
+                  />
+                </div>
+                {p.error && (
+                  <div className="error" style={{ marginTop: 6 }}>
+                    {p.error}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
         {hfModelError && <div className="error">{hfModelError}</div>}
         <div className="hint">
           モデルはアプリのモデル保存領域へ保存されます。初回取得後はオフラインでも実行できます。
           推論にはネイティブONNX
           Runtimeを使い、利用可能なGPUプロバイダーまたはCPUで実行します。
-        </div>
-      </section>
-
-      <section className="card">
-        <div className="card-title row-between">
-          <span>旧モデル — Gemma 3 / 3n</span>
-          <button type="button" className="small" onClick={refreshModels}>
-            更新
-          </button>
-        </div>
-        <div className="model-grid">
-          {models.length === 0 && (
-            <p className="muted">
-              モデル情報を取得中… (Tauri外では表示されません)
-            </p>
-          )}
-          {models.map((m) => (
-            <div
-              key={m.model_id}
-              className={`model-card ${m.exists ? "exists" : "missing"}`}
-            >
-              <div className="model-id">{m.model_id}</div>
-              <div className="model-meta">
-                <span className={`pill ${m.quantization}`}>
-                  {m.quantization}
-                </span>
-                <span className="muted">{formatBytes(m.size_bytes)}</span>
-                <span className={`pill ${m.exists ? "ok" : "warn"}`}>
-                  {m.exists ? "ready" : "missing"}
-                </span>
-              </div>
-              <div className="model-desc">{m.description}</div>
-              <code className="model-path">{m.onnx_path}</code>
-            </div>
-          ))}
-        </div>
-
-        <div className="download-panel">
-          <div className="download-title">画面からダウンロード</div>
-          <div className="download-controls">
-            <div className="download-variant-field">
-              <span id="download-variant-label">Variant</span>
-              <ModelVariantSelect
-                value={variant}
-                onChange={setVariant}
-                disabled={downloading}
-                labelId="download-variant-label"
-              />
-            </div>
-            <button
-              type="button"
-              className="primary"
-              onClick={handleDownload}
-              disabled={downloading}
-            >
-              {downloading ? "ダウンロード中…" : "モデルをダウンロード"}
-            </button>
-            <span className="muted" style={{ fontSize: "0.78rem" }}>
-              Hugging Face (onnx-community)
-              から取得。既存ファイルはスキップ。1GB超のため数分かかります。
-            </span>
-          </div>
-
-          {downloadEntries.length > 0 && (
-            <div className="download-progress">
-              {downloadEntries.map((p) => (
-                <div key={p.file} className="dl-row">
-                  <div className="dl-file">
-                    <strong>{p.file}</strong>
-                    <span className="muted">
-                      {formatBytes(p.downloaded)}{" "}
-                      {p.total ? `/ ${formatBytes(p.total)}` : ""}{" "}
-                      {p.percent != null ? `· ${p.percent.toFixed(1)}%` : ""}
-                    </span>
-                    {p.done && !p.error && (
-                      <span className="pill ok">done</span>
-                    )}
-                    {p.error && <span className="pill warn">error</span>}
-                  </div>
-                  <div className="progress-bar">
-                    <div
-                      className="progress-fill"
-                      style={{ width: `${p.percent ?? (p.done ? 100 : 0)}%` }}
-                    />
-                  </div>
-                  {p.error && (
-                    <div className="error" style={{ marginTop: 6 }}>
-                      {p.error}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {downloadComplete && (
-            <div className="hint success">
-              ✓ ダウンロード完了: <code>{downloadComplete.length} files</code> —
-              自動で model ✓ に切替わり、生成で実推論が使われます。
-              {downloadComplete.map((f) => (
-                <div
-                  key={f}
-                  style={{ fontSize: "0.75rem", wordBreak: "break-all" }}
-                >
-                  {f}
-                </div>
-              ))}
-            </div>
-          )}
-          {downloadError && !downloading && (
-            <div className="error">{downloadError}</div>
-          )}
-        </div>
-
-        <div className="hint">
-          CLI: <code>bun run download:model:1b</code>{" "}
-          でも取得可。配置前はモック推論でUI/パイプラインを検証できます。
         </div>
       </section>
 
@@ -1086,6 +1036,92 @@ export default function App() {
           </div>
         </section>
       )}
+
+      <details className="card legacy-models">
+        <summary>旧Gemmaモデル（互換性確認用）</summary>
+        <div className="card-title row-between">
+          <span>旧モデル — Gemma 3 / 3n</span>
+          <button type="button" className="small" onClick={refreshModels}>
+            更新
+          </button>
+        </div>
+        <div className="model-grid">
+          {models.length === 0 && (
+            <p className="muted">
+              モデル情報を取得中… (Tauri外では表示されません)
+            </p>
+          )}
+          {models.map((m) => (
+            <div
+              key={m.model_id}
+              className={`model-card ${m.exists ? "exists" : "missing"}`}
+            >
+              <div className="model-id">{m.model_id}</div>
+              <div className="model-meta">
+                <span className={`pill ${m.quantization}`}>
+                  {m.quantization}
+                </span>
+                <span className="muted">{formatBytes(m.size_bytes)}</span>
+                <span className={`pill ${m.exists ? "ok" : "warn"}`}>
+                  {m.exists ? "ready" : "missing"}
+                </span>
+              </div>
+              <div className="model-desc">{m.description}</div>
+              <code className="model-path">{m.onnx_path}</code>
+            </div>
+          ))}
+        </div>
+
+        <div className="download-panel">
+          <div className="download-title">画面からダウンロード</div>
+          <div className="download-controls">
+            <div className="download-variant-field">
+              <span id="download-variant-label">Variant</span>
+              <ModelVariantSelect
+                value={variant}
+                onChange={setVariant}
+                disabled={downloading}
+                labelId="download-variant-label"
+              />
+            </div>
+            <button
+              type="button"
+              className="primary"
+              onClick={handleDownload}
+              disabled={downloading}
+            >
+              {downloading ? "ダウンロード中…" : "モデルをダウンロード"}
+            </button>
+            <span className="muted" style={{ fontSize: "0.78rem" }}>
+              Hugging Face (onnx-community)
+              から取得。既存ファイルはスキップ。1GB超のため数分かかります。
+            </span>
+          </div>
+
+          {downloadComplete && (
+            <div className="hint success">
+              ✓ ダウンロード完了: <code>{downloadComplete.length} files</code> —
+              自動で model ✓ に切替わり、生成で実推論が使われます。
+              {downloadComplete.map((f) => (
+                <div
+                  key={f}
+                  style={{ fontSize: "0.75rem", wordBreak: "break-all" }}
+                >
+                  {f}
+                </div>
+              ))}
+            </div>
+          )}
+          {downloadError && !downloading && (
+            <div className="error">{downloadError}</div>
+          )}
+        </div>
+
+        <div className="hint">
+          CLI: <code>bun run download:model:1b</code>{" "}
+          でも取得可。配置前はモック推論でUI/パイプラインを検証できます。
+        </div>
+      </details>
 
       <section className="card howto">
         <div className="card-title">検証手順 (Bun)</div>
