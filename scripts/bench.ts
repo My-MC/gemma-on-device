@@ -8,6 +8,8 @@
  *   bun run bench -- --iters 5 --prompt "こんにちは"
  */
 
+import defaultModel from "../src/default-model.json";
+
 type Args = { iters: number; prompt: string };
 function parseArgs(): Args {
   const itersIdx = process.argv.indexOf("--iters");
@@ -17,7 +19,7 @@ function parseArgs(): Args {
     prompt:
       promptIdx >= 0
         ? process.argv[promptIdx + 1]
-        : "こんにちは、Gemmaの推論速度を計測しています。",
+        : "こんにちは。日本語で短く自己紹介してください。",
   };
 }
 
@@ -29,8 +31,14 @@ async function main() {
   console.log(`  bun: ${Bun.version}`);
 
   // Try to check if model exists (mock vs real)
-  const modelPath = "models/gemma-3-1b-it-int4.onnx";
-  const tokPath = "models/tokenizer.json";
+  const identity = new Bun.CryptoHasher("sha256")
+    .update(
+      `${defaultModel.repo}@${defaultModel.revision}:${defaultModel.graph}`,
+    )
+    .digest("hex");
+  const root = `models/huggingface/${identity}`;
+  const modelPath = `${root}/${defaultModel.graph}`;
+  const tokPath = `${root}/tokenizer.json`;
   const modelExists = await Bun.file(modelPath).exists();
   const tokExists = await Bun.file(tokPath).exists();
   console.log(`  model: ${modelPath} ${modelExists ? "✓" : "✗ (mock)"}`);
@@ -48,7 +56,7 @@ async function main() {
     const tps = tokens / (latency / 1000);
     results.push({ latency, tps });
     console.log(
-      `  iter ${i + 1}: ${latency.toFixed(1)} ms — ${tps.toFixed(1)} tok/s ${modelExists && tokExists ? "" : "(mock)"}`,
+      `  iter ${i + 1}: ${latency.toFixed(1)} ms — ${tps.toFixed(1)} tok/s (mock)`,
     );
   }
 
@@ -57,7 +65,7 @@ async function main() {
   const avgTps = results.reduce((a, b) => a + b.tps, 0) / results.length;
   console.log(`\n  avg latency: ${avgLatency.toFixed(1)} ms`);
   console.log(
-    `  avg tok/s:   ${avgTps.toFixed(1)} ${modelExists && tokExists ? "" : "(mock — real model not present)"}`,
+    `  avg tok/s:   ${avgTps.toFixed(1)} (mock loop; model files are not used)`,
   );
   console.log(`\n  Thresholds: Desktop 5 tok/s / Mobile 2 tok/s (INT4)`);
   console.log(
@@ -67,7 +75,7 @@ async function main() {
   // Also try invoking Tauri Rust bench if built
   // This is a placeholder for future cargo integration
   console.log(
-    `\n  Tip: For real Rust bench, run: bun run tauri dev then click "ベンチ実行" in UI, or: cargo run -p gemma-on-device --features bench`,
+    `\n  Tip: For real Rust bench, run: bun run tauri dev then click "ベンチ実行" with ${defaultModel.name} selected.`,
   );
 }
 

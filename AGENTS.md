@@ -4,9 +4,13 @@ This file defines repository-specific operational rules for agents/contributors 
 
 ## Project Overview
 
-- **Purpose**: Validate whether Rust `ort` (ONNX Runtime) can run Gemma mobile models (3 1B INT4 → 3n E2B INT4) for multi-platform inference via Tauri
+- **Purpose**: Run Hugging Face ONNX models across desktop and mobile through native Rust `ort`, with shared graph execution and adapters for model input contracts.
 - **Package name**: `gemma-on-device` / **identifier**: `com.gemmaondevice.app` / **productName**: `Gemma On Device`
 - **Workspace**: root `Cargo.toml` contains the `src-tauri` crate.
+- **Default model**: LFM2.5 350M Q4. `src/default-model.json` is the shared UI/backend/CLI definition with pinned revision and SHA256. Gemma 3 is an explicit legacy option.
+- **Initial catalog**: show LFM2.5, Qwen3, Bonsai, and SmolLM3 before repeat variants of a series. Keep legacy Gemma controls collapsed; catalog cards and the selector share `LOCAL_MODELS` in `src/inference.ts`.
+- **Selection menus**: use `src/AppSelect.tsx` with the bundled Japanese font for triggers and options. Avoid native `<select>` popups, whose font rendering can depend on the host/WSL environment; preserve keyboard navigation and focus handling.
+- **Token budgets**: context defaults to 4096 and accepts any positive integer without an application ceiling; generation defaults to 2048 with a 4096 ceiling. `inference/limits.rs` enforces the total prompt + output budget and model context capacity; do not restore a hidden 512-token clamp.
 
 ## Tech Stack
 
@@ -21,7 +25,7 @@ Use `package.json`, `src-tauri/Cargo.toml`, and the lockfiles as the version sou
 
 - `src/` — React (Bun + Vite), `src/App.tsx` is the main screen for download/inference/bench
 - `src-tauri/` — Rust, `src/lib.rs` hosts Tauri commands + `setup` (app_data_dir), `src/inference/{session,tokenizer,generate,bench,download}.rs`
-- `models/` — model binaries are ignored; see `models/README.md`. Real inference uses `gemma-3-1b-it-int4.onnx` + `model_q4.onnx_data` + the 1B `tokenizer.json`. Missing graph/tokenizer triggers `generate.rs:mock_generate`; errors on the real path are returned to the caller. INT8 and 3n downloads do not select a different inference model.
+- `models/` — model binaries are ignored; see `models/README.md`. Default LFM2.5 and other ONNX models use isolated `huggingface/<identity>/` directories and SHA256 manifests. The explicit legacy Gemma route uses the root-level 1B INT4 files and may return mock output if those files are absent.
 - `scripts/` — model download/export, mock CLI bench, environment checks, Windows DLL/runtime staging, edition builds, and license generation.
 - `scripts/generate_licenses.ts` generates the target- and edition-specific report in ignored `src/generated/licenses.json`, shown by the footer license viewer.
 - `Cargo.toml` (workspace root) is `members = ["src-tauri"]`, `resolver = "2"` only
@@ -43,7 +47,7 @@ bun run tauri ios dev      # requires Xcode
 bun run tauri ios build --target aarch64 --features coreml --no-sign --ci  # unsigned AltStore Classic IPA
 bun run build              # tsc && vite build
 bun run tauri build        # bundle
-bun run download:model     # 1b-int4 (onnx-community)
+bun run download:model     # LFM2.5 350M Q4 (pinned ONNX, SHA256 manifest)
 bun run bench              # CLI bench
 bun run check:ort          # environment diagnostics
 bun run licenses:generate # refresh host/selected target dependency licenses
@@ -88,6 +92,8 @@ Agents may work in a Git worktree. Each worktree is an isolated working director
 
 ## Tauri Specifics
 
+- **Hugging Face models**: `huggingface.rs` owns pinned discovery, external tensor inspection, isolated model directories, SHA256 manifests, and session preparation. `decoder.rs` handles causal text graphs and native KV tensors. `src/inference.ts` only invokes Tauri commands; do not reintroduce browser inference dependencies. Unsupported input contracts require native adapters. Non-LFS files are checked against Git blob digests before SHA256 is recorded; every saved file is re-verified before preparation.
+
 - `src-tauri/src/lib.rs:resolve_model_dir_for_app()` prefers existing project `models/` only for non-mobile debug builds; release/mobile builds use `app_data_dir/models`. If app-data resolution fails, it falls back to `resolve_model_dir()`.
 - `src-tauri/capabilities/default.json` grants `core:default` + `opener:default` to the `main` window. App commands are registered in `src-tauri/src/lib.rs:run()` via `generate_handler!`.
 - `src-tauri/src/inference/download.rs` streams via `reqwest` (`rustls-tls`) and emits `app.emit("download-progress")` / `emit("download-complete")`, listened to in `src/App.tsx`. Downloads are verified via SHA256 (`models/README.md`, see `CONTRIBUTING.md`).
@@ -117,7 +123,7 @@ Agents may work in a Git worktree. Each worktree is an isolated working director
 - Mobile providers (`nnapi`, `xnnpack`, `coreml`) require explicit Cargo features; CoreML is not automatically enabled. iOS config sets minimum version 16.4 for the frontend browser baseline and a development team that must match the contributor's signing setup.
 - CI builds Android ARM64 APK/AAB on `master` pushes, pull requests, and manual runs. When `ANDROID_KEY_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and `ANDROID_STORE_PASSWORD` are available as repository secrets, CI signs the packages; otherwise it builds unsigned packages and reports that mode. GitHub withholds these secrets from fork pull requests. Unsigned APKs require signing before device installation.
 - CI builds an unsigned iOS ARM64 Release IPA with Tauri `--no-sign` on `master` pushes, pull requests, and manual runs. AltStore Classic signs it during sideloading, so no iOS signing secrets are required. Mobile artifacts are retained for seven days. Device inference validation remains manual.
-- The pinned 1B INT4 graph/data/tokenizer total about 0.88 GB; allow additional download space and roughly 2–3 GB RAM for inference (4 GB+ device recommended). 3n is downloadable but its embedding pipeline is not implemented.
+- Default LFM2.5 Q4 external weights use about 280 MB; measure memory and execution providers on target devices. Legacy 1B INT4 files use about 0.88 GB and roughly 2–3 GB RAM at inference. The 3n embedding pipeline is not implemented.
 
 ## Verification
 

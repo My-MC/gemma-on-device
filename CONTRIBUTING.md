@@ -160,14 +160,22 @@ Rules:
 
 ## Model Management & SHA256 Verification
 
+The default LFM2.5 350M Q4 and additional Hugging Face models use native Rust `ort` through `huggingface.rs` and `decoder.rs`. `src/default-model.json` defines the default for the UI, backend, and `bun run download:model`; update its pinned revision and all hashes together with `models/README.md` when changing the default. Keep graph files, external tensors, and tokenizers isolated under `models/huggingface/<identity>/`. Record a pinned commit and SHA256 manifest after every required file is verified. Non-LFS metadata/tokenizer files must match their Hub Git blob digest before recording SHA256. Every saved file is re-verified before preparation. Add native adapters for new input conventions; unsupported graphs must return a compatibility error.
+
+The opt-in native smoke check downloads small pinned models and checks real ORT generation, streaming, session reuse, and rejection of modified tokenizers:
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml downloaded_hf_native_smoke -- --ignored --nocapture
+```
+
 - `models/` is `.gitignore`d. **Never commit** `*.onnx`, `*.onnx_data`, `*.safetensors`.
 - Expected files (see `models/README.md`):
   - `gemma-3-1b-it-int4.onnx` (+ `model_q4.onnx_data` kept literal for external_data) + `tokenizer.json`
   - `gemma-3-1b-it-int8.onnx` (single-file graph) + `tokenizer.json`
   - `gemma-3n-E2B-it-int4.onnx` (+ `decoder_model_merged_q4.onnx_data` literal) + `tokenizer.json`
-- Downloads are performed via:
+- Legacy Gemma downloads are performed via:
   - UI: Tauri command `download_model { variant }` in `src-tauri/src/inference/download.rs` (streams with `reqwest` + `rustls-tls`, emits `download-progress` / `download-complete` to `src/App.tsx`)
-  - CLI: `bun run download:model` (`scripts/download_model.ts`)
+  - CLI: `bun run download:model:1b` / `bun run download:model:3n` (`scripts/download_model.ts`)
 - **SHA256 verification is mandatory** after every download and before `Session::commit_from_file`:
   1. After streaming to a temporary `.part` file, compute SHA256 of the completed file.
   2. Compare against the expected hash listed in `models/README.md`, mirrored in Rust `FileSpec.expected_sha256` and Bun `SHA256`.
@@ -176,7 +184,7 @@ Rules:
   5. For files copied or changed outside the downloader, manually verify the graph, external data, and tokenizer before inference. The current inference path loads them without automatic SHA256 re-verification; a session is cached for reuse.
 - Current status commands (`check_model_status` / `get_model_info`) call `model_variants`, which checks only graph/tokenizer existence. `exists: true` does not certify SHA256 or external data readiness; status-time hash verification is not implemented.
 - The Rust downloader treats a failed 3n `.onnx_data` download as optional: it reports `optional missing` and can emit `download-complete` with only the successful paths. The CLI fails on that error. Do not interpret a partial 3n download as inference readiness.
-- Generation always uses 1B INT4. INT8 and 3n are downloadable experimental variants, not selectable inference models. Missing default graph/tokenizer uses mock output; errors on the real path are returned to the caller.
+- The explicitly selected legacy Gemma route uses 1B INT4. Its INT8 and 3n download options do not change that route. Missing legacy graph/tokenizer uses mock output. The default LFM2.5 and other Hugging Face graphs use native `ort` without mock fallback.
 - The 1B and 3n tokenizers have different hashes but share `tokenizer.json`. Downloading 3n overwrites it; re-download 1B before running 1B inference, and restart an app that has already cached a session after replacing model files. The 3n `inputs_embeds` pipeline is not implemented.
 - To add or rotate a model variant, update `models/README.md`, Rust `variant_specs`, and Bun `SHA256` in the **same PR**. Include verification output for all affected files and the hash source in the PR description:
   ```

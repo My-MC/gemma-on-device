@@ -4,6 +4,8 @@
  * Usage: bun run check:ort
  */
 
+import defaultModel from "../src/default-model.json";
+
 async function main() {
   console.log("\n[check:ort] Environment");
   console.log(`  bun: ${Bun.version} / ${process.platform} ${process.arch}`);
@@ -32,13 +34,18 @@ async function main() {
   );
 
   // Check model files
-  const files = [
-    "models/gemma-3-1b-it-int4.onnx",
-    "models/model_q4.onnx_data",
-    "models/tokenizer.json",
-    "models/gemma-3n-E2B-it-int4.onnx",
-  ];
-  console.log("\n  models/");
+  const identity = new Bun.CryptoHasher("sha256")
+    .update(
+      `${defaultModel.repo}@${defaultModel.revision}:${defaultModel.graph}`,
+    )
+    .digest("hex");
+  const root = `models/huggingface/${identity}`;
+  const files = [...Object.keys(defaultModel.sha256), "manifest.json"].map(
+    (file) => `${root}/${file}`,
+  );
+  console.log(
+    `\n  default model: ${defaultModel.name} Q4 (file presence only)`,
+  );
   for (const f of files) {
     const exists = await Bun.file(f).exists();
     let size = "";
@@ -63,7 +70,7 @@ async function main() {
 
   console.log("\n  Next:");
   console.log("    bun install");
-  console.log("    bun run download:model   # or mock without download");
+  console.log("    bun run download:model   # LFM2.5 350M Q4, SHA256 verified");
   console.log("    bun run tauri dev        # desktop");
   console.log("    bun run tauri android dev # mobile (needs NDK)");
 }

@@ -49,16 +49,19 @@ async fn get_model_info(state: State<'_, AppState>) -> Result<Vec<ModelInfo>, St
 }
 
 #[tauri::command]
-async fn generate(
+async fn generate_gemma(
     prompt: String,
     max_tokens: Option<usize>,
+    context_length: Option<usize>,
     temperature: Option<f32>,
     use_chat_template: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<GenerateResult, String> {
+    *state.hf_session.lock().await = None;
     let opts = GenerateOptions {
         prompt,
         max_tokens,
+        context_length,
         temperature,
         use_chat_template,
     };
@@ -68,17 +71,20 @@ async fn generate(
 }
 
 #[tauri::command]
-async fn generate_stream(
+async fn generate_stream_gemma(
     app: tauri::AppHandle,
     prompt: String,
     max_tokens: Option<usize>,
+    context_length: Option<usize>,
     temperature: Option<f32>,
     use_chat_template: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<GenerateResult, String> {
+    *state.hf_session.lock().await = None;
     let opts = GenerateOptions {
         prompt,
         max_tokens,
+        context_length,
         temperature,
         use_chat_template,
     };
@@ -100,13 +106,70 @@ async fn generate_stream(
 
 #[tauri::command]
 async fn bench_inference(
+    app: tauri::AppHandle,
     iterations: Option<usize>,
+    legacy_gemma: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<inference::bench::BenchResult, String> {
     let iters = iterations.unwrap_or(3).min(10);
-    inference::bench::run_bench(&state, iters)
+    inference::bench::run_bench(&app, &state, iters, legacy_gemma.unwrap_or(false))
         .await
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn generate(
+    app: tauri::AppHandle,
+    prompt: String,
+    max_tokens: Option<usize>,
+    context_length: Option<usize>,
+    temperature: Option<f32>,
+    use_chat_template: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<GenerateResult, String> {
+    generate_hf(
+        app,
+        None,
+        GenerateOptions {
+            prompt,
+            max_tokens,
+            context_length,
+            temperature,
+            use_chat_template,
+        },
+        false,
+        state,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn generate_stream(
+    app: tauri::AppHandle,
+    prompt: String,
+    max_tokens: Option<usize>,
+    context_length: Option<usize>,
+    temperature: Option<f32>,
+    use_chat_template: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<GenerateResult, String> {
+    let result = generate_hf(
+        app.clone(),
+        None,
+        GenerateOptions {
+            prompt,
+            max_tokens,
+            context_length,
+            temperature,
+            use_chat_template,
+        },
+        true,
+        state,
+    )
+    .await?;
+    app.emit("generation-complete", &result)
+        .map_err(|e| e.to_string())?;
+    Ok(result)
 }
 
 #[tauri::command]
@@ -115,10 +178,57 @@ async fn download_model(
     variant: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    let v = variant.unwrap_or_else(|| "1b-int4".to_string());
+    let Some(v) = variant else {
+        let source = inference::huggingface::default_source().map_err(|e| e.to_string())?;
+        let prepared = inference::huggingface::prepare(&app, &state, &source)
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+        return Ok(vec![prepared.model_id]);
+    };
     inference::download::download_model(app, state.model_dir.clone(), v)
         .await
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn discover_hf_models(
+    repo: String,
+) -> Result<Vec<inference::huggingface::DiscoveredModel>, String> {
+    inference::huggingface::discover(&repo)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn prepare_hf_model(
+    app: tauri::AppHandle,
+    source: Option<inference::huggingface::ModelSource>,
+    state: State<'_, AppState>,
+) -> Result<inference::huggingface::PreparedModel, String> {
+    let source = source
+        .map(Ok)
+        .unwrap_or_else(inference::huggingface::default_source)
+        .map_err(|e| e.to_string())?;
+    inference::huggingface::prepare(&app, &state, &source)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn generate_hf(
+    app: tauri::AppHandle,
+    source: Option<inference::huggingface::ModelSource>,
+    options: GenerateOptions,
+    stream: bool,
+    state: State<'_, AppState>,
+) -> Result<GenerateResult, String> {
+    let source = source
+        .map(Ok)
+        .unwrap_or_else(inference::huggingface::default_source)
+        .map_err(|e| e.to_string())?;
+    inference::decoder::generate(&app, &state, source, options, stream)
+        .await
+        .map_err(|e| format!("{e:#}"))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -145,8 +255,13 @@ pub fn run() {
             get_model_info,
             generate,
             generate_stream,
+            generate_gemma,
+            generate_stream_gemma,
             bench_inference,
-            download_model
+            download_model,
+            discover_hf_models,
+            prepare_hf_model,
+            generate_hf
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

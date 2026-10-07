@@ -21,7 +21,7 @@ Use this document when creating or changing screens in Gemma On Device. The desi
 ## Inputs and selection controls
 
 - Do not use OS- or browser-rendered `<select>` popups. Some environments do not apply the bundled font to these controls, which can render Japanese text as tofu.
-- Use `AppSelect` in `src/App.tsx` for selection UI. Render the listbox in the DOM and expose `role="listbox"`, `role="option"`, selection state, and the active item. Support Arrow Up/Down, Home/End, Enter/Space, Escape, Tab, and outside clicks.
+- Use the shared `AppSelect` in `src/AppSelect.tsx` for selection UI. Render the listbox in the DOM and expose `role="listbox"`, `role="option"`, selection state, and the active item. Support Arrow Up/Down, Home/End, Enter/Space, Escape, Tab, and outside clicks.
 - Use 56px as the standard height for inputs and dropdown triggers. Match labels, borders, backgrounds, and focus rings to the theme tokens. Keep action buttons at least 48px high.
 - Keep new selection controls browser-rendered, and verify keyboard interaction and focus restoration.
 
