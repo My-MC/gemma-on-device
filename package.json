@@ -17,6 +17,7 @@
     "check:ci": "biome ci . --error-on-warnings",
     "preview": "vite preview",
     "tauri": "tauri",
+    "tauri:desktop": "bun scripts/bundle_desktop.ts",
     "tauri:cuda": "bun scripts/build_tauri_edition.ts cuda",
     "tauri:migraphx": "bun scripts/build_tauri_edition.ts migraphx",
     "tauri:coreml": "bun scripts/build_tauri_edition.ts coreml",

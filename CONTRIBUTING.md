@@ -158,7 +158,7 @@ Rules:
 
 `.github/workflows/ci.yml` enforces frontend Biome checks/build and desktop check/clippy/fmt on PRs to `master`, builds desktop bundles on Linux/Windows/macOS, Android ARM64 APK/AAB, and unsigned iOS ARM64 IPA. It also runs on `master` pushes and manual dispatch. Bundle artifacts are retained for seven days; device/GPU inference benchmarks are not automated. A PR with failing checks will not be merged.
 
-CI's Rust cache must use `. -> target` because the Cargo workspace lives at the repository root. GPU edition and provider-feature cache keys are separated to avoid matrix jobs saving incompatible feature sets under one key. Runtime download caches contain only `.cache/runtime-wheels/downloads`; each restored archive is checked against `scripts/runtime_lock.json`. The compiled MIGraphX cache contains only the plugin, its license, and a hash manifest, and is invalidated by the locked source/SDK/ROCm version, patch/build script, and installed build environment. Do not cache expanded ROCm runtimes or the CMake build tree. Desktop upload paths must select completed installers rather than all of `target/release/bundle`. Run the offline cache validation tests after changing these scripts:
+CI's Rust cache must use `. -> target` because the Cargo workspace lives at the repository root. GPU edition and provider-feature cache keys are separated to avoid matrix jobs saving incompatible feature sets under one key. Runtime download caches contain only `.cache/runtime-wheels/downloads`; each restored archive is checked against `scripts/runtime_lock.json`. The compiled MIGraphX cache contains only the plugin, its license, and a hash manifest, and is invalidated by the locked source/SDK/ROCm version, patches/build specification, and installed build environment. Do not cache expanded ROCm runtimes or the CMake build tree. Desktop upload paths must select completed installers rather than all of `target/release/bundle`. Run the offline cache validation tests after changing these scripts:
 
 ```bash
 python3 -m unittest discover -s scripts -p test_runtime_cache.py
@@ -207,6 +207,10 @@ python3 -m unittest discover -s scripts -p test_runtime_cache.py
 - `AGENTS.md` — agent operational rules (summary of this file).
 - `models/README.md` — model variants, sizes, download instructions, expected SHA256 hashes.
 - `src-tauri/capabilities/default.json` — `core:default` + `opener:default` for the `main` window. App commands are registered with `generate_handler!` in `src-tauri/src/lib.rs`.
+
+Desktop CPU bundles use `bun run tauri:desktop`; GPU edition commands use the same packaging helpers. Debian/RPM use zstd level 3, AppImage uses `LDAI_COMP=zstd`, and DMG uses LZFSE (ULFO). The Python packager requires Python 3.11+ and zstd-capable dpkg for Debian. Tests create and extract a real zstd Debian archive to verify resources, symlinks, permissions, licenses, and dependency metadata. The helper keeps Tauri's `/usr/lib/<productName>` runtime location. Plain Tauri builds retain the upstream Debian/DMG compression behavior.
+
+MIGraphX cache keys use the explicit `scripts/migraphx_build_spec.json` rather than hashing the entire builder or workflow. Keep all artifact-affecting CMake options in this specification; increment `cacheSchema` for builder behavior changes not covered by source/SDK, patches, toolchains, or flags. Parallel job counts are deliberately excluded. GPU CI removes unused SDKs only below its free-space threshold (16 GiB CUDA, 32 GiB MIGraphX), checking after each deletion.
 
 ## Execution Providers
 

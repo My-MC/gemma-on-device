@@ -10,6 +10,7 @@ import {
   symlink,
 } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
+import { packageDesktop } from "./bundle_desktop";
 
 type Edition = "cuda" | "migraphx" | "coreml";
 type RuntimeManifest = {
@@ -175,27 +176,13 @@ await Bun.write(
 
 const cargoFeature = `desktop-${edition}`;
 const config = "src-tauri/tauri.gpu.conf.json";
-const bundleArgs = process.platform === "linux" ? ["--bundles", "deb"] : [];
-if (process.argv.includes("--no-bundle")) bundleArgs.push("--no-bundle");
-if (edition === "migraphx") {
-  bundleArgs.push(
-    "--config",
-    JSON.stringify({
-      bundle: {
-        linux: {
-          deb: {
-            depends: [
-              "libnuma1",
-              "libdrm2",
-              "libdrm-amdgpu1",
-              "libelf1 | libelf1t64",
-            ],
-          },
-        },
-      },
-    }),
-  );
-}
+const skipPackage = process.argv.includes("--no-bundle");
+const bundleArgs =
+  skipPackage || process.platform === "linux"
+    ? ["--no-bundle"]
+    : process.platform === "darwin"
+      ? ["--bundles", "app"]
+      : [];
 const proc = Bun.spawn(
   [
     "bun",
@@ -227,4 +214,5 @@ if (process.exitCode === 0) {
       throw new Error(`Tauri runtime copy is corrupted: ${file}`);
     }
   }
+  if (!skipPackage) await packageDesktop(edition);
 }

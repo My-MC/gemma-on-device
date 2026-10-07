@@ -76,6 +76,12 @@ class RuntimeCacheTests(unittest.TestCase):
                 self.assertNotEqual(plugin.plugin_cache_path(lock, self.root, rocm, patch_file), original)
             with patch.dict(os.environ, {"CXXFLAGS": "-DNEW_BUILD_FLAG"}):
                 self.assertNotEqual(plugin.plugin_cache_path(lock, self.root, rocm, patch_file), original)
+            with patch.dict(os.environ, {"CMAKE_BUILD_PARALLEL_LEVEL": "8"}):
+                self.assertEqual(plugin.plugin_cache_path(lock, self.root, rocm, patch_file), original)
+            changed_spec = copy.deepcopy(plugin.BUILD_SPEC)
+            changed_spec["cmakeOptions"]["USE_MIGRAPHX"] = "OFF"
+            with patch.object(plugin, "BUILD_SPEC", changed_spec):
+                self.assertNotEqual(plugin.plugin_cache_path(lock, self.root, rocm, patch_file), original)
             with patch.object(plugin.subprocess, "check_output", return_value="tool v2"):
                 self.assertNotEqual(plugin.plugin_cache_path(lock, self.root, rocm, patch_file), original)
 

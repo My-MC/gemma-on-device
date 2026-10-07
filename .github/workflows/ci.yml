@@ -40,6 +40,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      - uses: actions/setup-python@v6
+        if: runner.os != 'Windows'
+        with:
+          python-version: "3.12"
       - uses: oven-sh/setup-bun@v2
         if: runner.os == 'Windows'
         with:
@@ -78,13 +82,7 @@ jobs:
       - name: Free space for bundled GPU runtimes
         if: runner.os == 'Linux'
         run: |
-          sudo python3 - <<'PY'
-          import pathlib, shutil
-          for folder in ('/usr/share/dotnet', '/usr/local/lib/android'):
-              path = pathlib.Path(folder)
-              if path.is_dir():
-                  shutil.rmtree(path)
-          PY
+          sudo python3 scripts/ensure_ci_disk_space.py --edition '${{ matrix.edition }}'
       - name: Install Tauri system dependencies
         if: runner.os == 'Linux'
         run: |
@@ -128,18 +126,30 @@ jobs:
         if: matrix.edition == 'migraphx'
         id: migraphx-build
         run: |
-          {
-            cmake --version
-            c++ --version
-            dpkg-query -W -f='${binary:Package}=${Version}\n' | LC_ALL=C sort | awk '/^(migraphx|hip|rocm|hsa-rocr|comgr|rocblas|miopen)/'
-          } > "$RUNNER_TEMP/migraphx-build-environment"
-          echo "identity=$(sha256sum "$RUNNER_TEMP/migraphx-build-environment" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, shlex, subprocess
+          lock = json.loads(pathlib.Path('scripts/runtime_lock.json').read_text())
+          packages = subprocess.check_output(['dpkg-query', '-W', '-f=${binary:Package}=${Version}\n'], text=True)
+          environment = {
+              'cmake': subprocess.check_output(['cmake', '--version'], text=True),
+              'compiler': subprocess.check_output([*shlex.split(os.environ.get('CXX') or 'c++'), '--version'], text=True),
+              'c_compiler': subprocess.check_output([*shlex.split(os.environ.get('CC') or 'cc'), '--version'], text=True),
+              'flags': {name: os.environ.get(name, '') for name in ('CC', 'CXX', 'CFLAGS', 'CXXFLAGS', 'LDFLAGS')},
+              'packages': sorted(line for line in packages.splitlines() if line.startswith(('migraphx', 'hip', 'rocm', 'hsa-rocr', 'comgr', 'rocblas', 'miopen'))),
+          }
+          inputs = {name: lock[name] for name in ('ort', 'rocm_version', 'migraphx_plugin')}
+          inputs['spec'] = json.loads(pathlib.Path('scripts/migraphx_build_spec.json').read_text())
+          inputs['patches'] = {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in sorted(pathlib.Path('scripts/patches').glob('migraphx*'))}
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              for name, value in (('identity', environment), ('inputs', inputs)):
+                  output.write(f'{name}={hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()}\n')
+          PY
       - name: Cache compiled MIGraphX plugin
         if: matrix.edition == 'migraphx'
         uses: actions/cache@v6
         with:
           path: .cache/runtime-wheels/migraphx-plugin-cache
-          key: migraphx-plugin-v1-${{ matrix.os }}-${{ runner.arch }}-${{ steps.migraphx-build.outputs.identity }}-${{ hashFiles('scripts/runtime_lock.json', 'scripts/build_migraphx_plugin.py', 'scripts/patches/**', '.github/workflows/ci.yml') }}
+          key: migraphx-plugin-v2-${{ matrix.os }}-${{ runner.arch }}-${{ steps.migraphx-build.outputs.identity }}-${{ steps.migraphx-build.outputs.inputs }}
       - name: Build edition bundle
         run: bun run tauri:${{ matrix.edition }}
         env:
@@ -197,7 +207,7 @@ jobs:
       - name: Check lint, formatting, and imports (Biome)
         run: bun run check:ci
       - name: Test runtime cache validation
-        run: python3 -m unittest discover -s scripts -p test_runtime_cache.py
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - name: Build (tsc + vite)
         run: bun run build
 
@@ -242,7 +252,7 @@ jobs:
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
       - name: Build Tauri bundle — Linux/macOS
         if: runner.os != 'Windows'
-        run: bun run tauri build
+        run: bun run tauri:desktop
         env:
           CI: true
       - name: Build Tauri bundle — Windows (dynamic ONNX Runtime to avoid CRT mismatch)

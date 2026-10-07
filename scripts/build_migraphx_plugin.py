@@ -11,6 +11,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+BUILD_SPEC = json.loads((Path(__file__).parent / "migraphx_build_spec.json").read_text())
 
 def digest(path: Path) -> str:
     value = hashlib.sha256()
@@ -30,7 +31,7 @@ def plugin_cache_path(lock: dict, cache: Path, rocm: Path, patch: Path) -> Path:
         "rocm_path": str(rocm),
         "arch": platform.machine(),
         "patch": digest(patch),
-        "builder": digest(Path(__file__)),
+        "build_spec": BUILD_SPEC,
         "build_environment": os.environ.get("GEMMA_MIGRAPHX_BUILD_ID", ""),
         "compiler_environment": {
             name: os.environ.get(name, "")
@@ -38,6 +39,9 @@ def plugin_cache_path(lock: dict, cache: Path, rocm: Path, patch: Path) -> Path:
         },
         "tools": {
             "cmake": subprocess.check_output(["cmake", "--version"], text=True),
+            "c_compiler": subprocess.check_output(
+                [*shlex.split(os.environ.get("CC") or "cc"), "--version"], text=True
+            ),
             "compiler": subprocess.check_output(
                 [*shlex.split(os.environ.get("CXX") or "c++"), "--version"], text=True
             ),
@@ -112,15 +116,14 @@ def build_plugin(lock: dict, cache: Path, destination: Path, fetch) -> Path:
         include_alias.symlink_to(".", target_is_directory=True)
     build = work / "build"
     subprocess.run([
-        "cmake", "-S", str(source), "-B", str(build), "-G", "Ninja",
-        "-DCMAKE_BUILD_TYPE=Release", f"-DCMAKE_PREFIX_PATH={sdk};{rocm}",
-        "-DUSE_AMDGPU=OFF", "-DUSE_MIGRAPHX=ON", "-DUSE_HIP=OFF", "-DUSE_DML=OFF",
-        "-DCMAKE_INSTALL_RPATH=$ORIGIN/lib;$ORIGIN/..",
+        "cmake", "-S", str(source), "-B", str(build), "-G", BUILD_SPEC["generator"],
+        f"-DCMAKE_PREFIX_PATH={sdk};{rocm}",
+        *[f"-D{name}={value}" for name, value in BUILD_SPEC["cmakeOptions"].items()],
     ], check=True)
     parallelism = os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL") or str(min(4, os.cpu_count() or 1))
     print(f"Building MIGraphX plugin with {parallelism} parallel jobs", flush=True)
     subprocess.run([
-        "cmake", "--build", str(build), "--target", "migraphx-ep", "--parallel",
+        "cmake", "--build", str(build), "--target", BUILD_SPEC["target"], "--parallel",
         parallelism,
     ], check=True)
     library = next(build.rglob("libmigraphx-ep.so"))

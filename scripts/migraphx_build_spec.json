@@ -1,0 +1,13 @@
+{
+  "cacheSchema": 1,
+  "generator": "Ninja",
+  "target": "migraphx-ep",
+  "cmakeOptions": {
+    "CMAKE_BUILD_TYPE": "Release",
+    "USE_AMDGPU": "OFF",
+    "USE_MIGRAPHX": "ON",
+    "USE_HIP": "OFF",
+    "USE_DML": "OFF",
+    "CMAKE_INSTALL_RPATH": "$ORIGIN/lib;$ORIGIN/.."
+  }
+}

@@ -42,7 +42,7 @@ bun run tauri android dev  # requires NDK
 bun run tauri ios dev      # requires Xcode
 bun run tauri ios build --target aarch64 --features coreml --no-sign --ci  # unsigned AltStore Classic IPA
 bun run build              # tsc && vite build
-bun run tauri build        # bundle
+bun run tauri:desktop      # CPU bundles with zstd/LZFSE packaging
 bun run download:model     # 1b-int4 (onnx-community)
 bun run bench              # CLI bench
 bun run check:ort          # environment diagnostics
@@ -123,7 +123,8 @@ Agents may work in a Git worktree. Each worktree is an isolated working director
 ## Verification
 
 - **CI**: `.github/workflows/ci.yml` runs on pushes/PRs to `master` and manual runs: frontend build; desktop Cargo check/clippy/fmt and bundles on Linux/Windows/macOS; Android ARM64 APK/AAB; and unsigned iOS ARM64 IPA. Bundle artifacts are retained for seven days. It does not prove hardware acceleration or device inference.
-- **CI caches/artifacts**: Rust cache uses `. -> target` for the root workspace, with separate GPU edition/provider-feature keys. Cache only runtime download archives (`.cache/runtime-wheels/downloads`) and the compiled MIGraphX plugin (`.cache/runtime-wheels/migraphx-plugin-cache`), not expanded ROCm runtimes or CMake trees. Downloads and cached plugin files are hash-verified; plugin keys include source/SDK, patch/build script, ROCm packages, and toolchain identity. Upload only completed desktop installers with `compression-level: 0`. Run `python3 -m unittest discover -s scripts -p test_runtime_cache.py` for runtime cache changes; CI runs it in the frontend job.
+- **CI caches/artifacts**: Rust cache uses `. -> target` for the root workspace, with separate GPU edition/provider-feature keys. Cache only runtime download archives (`.cache/runtime-wheels/downloads`) and the compiled MIGraphX plugin (`.cache/runtime-wheels/migraphx-plugin-cache`), not expanded ROCm runtimes or CMake trees. Downloads and cached plugin files are hash-verified; plugin keys include source/SDK, patches/build specification, ROCm packages, and toolchain identity. Upload only completed desktop installers with `compression-level: 0`. Run `python3 -m unittest discover -s scripts -p test_runtime_cache.py` for runtime cache changes; CI runs it in the frontend job.
+- **Desktop compression**: Use `bun run tauri:desktop` for CPU bundles and the edition scripts for GPU bundles. Debian/RPM use zstd level 3, AppImage uses `LDAI_COMP=zstd`, and DMG uses LZFSE (ULFO). `scripts/package_desktop.py` keeps Debian resources under `/usr/lib/<productName>`, preserves runtime symlinks/licenses, and uses hard-link staging. It requires Python 3.11+ and zstd-capable dpkg. Run `python3 -m unittest discover -s scripts -p 'test_*.py'` for packaging/cache/disk-cleanup changes. Keep artifact-affecting CMake options in `scripts/migraphx_build_spec.json`; bump `cacheSchema` for other artifact-affecting builder changes. Workflow text and parallel counts are excluded from plugin identity. GPU SDK cleanup runs only below 16 GiB free for CUDA or 32 GiB for MIGraphX.
 - **GUI smoke check**: Confirm the window renders and commands respond. `weston.log` is specific to WSLg; a registered window alone does not validate inference. Rendering warnings are acceptable only when the app works; Vite exit 143 on normal window close is expected.
 
 ### Per-Task Quality Gates (Mandatory)
