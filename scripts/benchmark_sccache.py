@@ -22,8 +22,9 @@ def run_benchmark(edition: str) -> None:
     env.pop("RUSTC_WORKSPACE_WRAPPER", None)
     env.update(CARGO_INCREMENTAL="0", CARGO_LOG="cargo::core::compiler::fingerprint=info")
     command = [
-        "cargo", "build", "--locked", "--release", "--manifest-path",
-        "src-tauri/Cargo.toml", "--features", f"desktop-{edition}",
+        "bun", "run", "tauri", "build", "--no-bundle",
+        "--features", f"desktop-{edition}",
+        "--config", json.dumps({"build": {"beforeBuildCommand": None}}),
     ]
     report = {
         "edition": edition,
@@ -94,7 +95,7 @@ def run_benchmark(edition: str) -> None:
             hits = sum(stats.get("cache_hits", {}).get("counts", {}).values())
             misses = sum(stats.get("cache_misses", {}).get("counts", {}).values())
             lines.append(f"| {row['mode']} | {row['seconds']:.2f} | {len(row['compiling_lines'])} | {hits} | {misses} |")
-        lines.extend(["", "Rust build only; runtime preparation, plugin C++ builds, bundling, and uploads are excluded. Each run restores the same Cargo snapshot. Cargo Compiling lines also include sccache-served requests. The unique remote cache namespace starts empty; server restarts between runs require cache retrieval. Sequential order and host load can affect results."])
+        lines.extend(["", "Tauri CLI Rust build with the frontend hook disabled; runtime preparation, plugin C++ builds, bundling, and uploads are excluded. Base/platform config is used, without GPU bundle resources. Each run restores the same Cargo snapshot. Cargo Compiling lines also include sccache-served requests. The unique remote cache namespace starts empty; server restarts between runs require cache retrieval. Sequential order and host load can affect results."])
         summary = "\n".join(lines) + "\n"
         (output / "summary.md").write_text(summary, encoding="utf-8")
         if os.environ.get("GITHUB_STEP_SUMMARY"):
