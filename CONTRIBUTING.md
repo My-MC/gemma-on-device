@@ -9,7 +9,7 @@ This guide defines the contributor workflow for `gemma-on-device` (`com.gemmaond
 - Linux prerequisites for Tauri 2: `libwebkit2gtk-4.1-dev build-essential libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf pkg-config` (see `README.md`)
 - Optional for mobile: Android Studio + NDK + `cargo-ndk` (`aarch64-linux-android` etc.), Xcode for iOS
 
-Dependency versions come from `package.json`, `src-tauri/Cargo.toml`, and their lockfiles. The frontend currently declares React `^19.3.0`, Vite `^8.3.0`, plugin-react `^6.1.1`, and TypeScript `~7.0.2`.
+Dependency versions come from `package.json`, `src-tauri/Cargo.toml`, and their lockfiles. The frontend currently declares React `^19.3.0`, Vite `^8.3.0`, plugin-react `^6.1.1`, TypeScript `~7.0.2`, shadcn/ui with Radix primitives, and Tailwind CSS `^4.3.3`.
 
 ## Getting Started
 
@@ -166,14 +166,22 @@ python3 -m unittest discover -s scripts -p test_runtime_cache.py
 
 ## Model Management & SHA256 Verification
 
+The default LFM2.5 350M Q4 and additional Hugging Face models use native Rust `ort` through `huggingface.rs` and `decoder.rs`. `src/default-model.json` defines the default for the UI, backend, and `bun run download:model`; update its pinned revision and all hashes together with `models/README.md` when changing the default. Keep graph files, external tensors, and tokenizers isolated under `models/huggingface/<identity>/`. Record a pinned commit and SHA256 manifest after every required file is verified. Non-LFS metadata/tokenizer files must match their Hub Git blob digest before recording SHA256. Every saved file is re-verified before preparation. Add native adapters for new input conventions; unsupported graphs must return a compatibility error.
+
+The opt-in native smoke check downloads small pinned models and checks real ORT generation, streaming, session reuse, and rejection of modified tokenizers:
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml downloaded_hf_native_smoke -- --ignored --nocapture
+```
+
 - `models/` is `.gitignore`d. **Never commit** `*.onnx`, `*.onnx_data`, `*.safetensors`.
 - Expected files (see `models/README.md`):
   - `gemma-3-1b-it-int4.onnx` (+ `model_q4.onnx_data` kept literal for external_data) + `tokenizer.json`
   - `gemma-3-1b-it-int8.onnx` (single-file graph) + `tokenizer.json`
   - `gemma-3n-E2B-it-int4.onnx` (+ `decoder_model_merged_q4.onnx_data` literal) + `tokenizer.json`
-- Downloads are performed via:
+- Legacy Gemma downloads are performed via:
   - UI: Tauri command `download_model { variant }` in `src-tauri/src/inference/download.rs` (streams with `reqwest` + `rustls-tls`, emits `download-progress` / `download-complete` to `src/App.tsx`)
-  - CLI: `bun run download:model` (`scripts/download_model.ts`)
+  - CLI: `bun run download:model:1b` / `bun run download:model:3n` (`scripts/download_model.ts`)
 - **SHA256 verification is mandatory** after every download and before `Session::commit_from_file`:
   1. After streaming to a temporary `.part` file, compute SHA256 of the completed file.
   2. Compare against the expected hash listed in `models/README.md`, mirrored in Rust `FileSpec.expected_sha256` and Bun `SHA256`.
@@ -182,7 +190,7 @@ python3 -m unittest discover -s scripts -p test_runtime_cache.py
   5. For files copied or changed outside the downloader, manually verify the graph, external data, and tokenizer before inference. The current inference path loads them without automatic SHA256 re-verification; a session is cached for reuse.
 - Current status commands (`check_model_status` / `get_model_info`) call `model_variants`, which checks only graph/tokenizer existence. `exists: true` does not certify SHA256 or external data readiness; status-time hash verification is not implemented.
 - The Rust downloader treats a failed 3n `.onnx_data` download as optional: it reports `optional missing` and can emit `download-complete` with only the successful paths. The CLI fails on that error. Do not interpret a partial 3n download as inference readiness.
-- Generation always uses 1B INT4. INT8 and 3n are downloadable experimental variants, not selectable inference models. Missing default graph/tokenizer uses mock output; errors on the real path are returned to the caller.
+- The explicitly selected legacy Gemma route uses 1B INT4. Its INT8 and 3n download options do not change that route. Missing legacy graph/tokenizer uses mock output. The default LFM2.5 and other Hugging Face graphs use native `ort` without mock fallback.
 - The 1B and 3n tokenizers have different hashes but share `tokenizer.json`. Downloading 3n overwrites it; re-download 1B before running 1B inference, and restart an app that has already cached a session after replacing model files. The 3n `inputs_embeds` pipeline is not implemented.
 - To add or rotate a model variant, update `models/README.md`, Rust `variant_specs`, and Bun `SHA256` in the **same PR**. Include verification output for all affected files and the hash source in the PR description:
   ```
@@ -224,7 +232,7 @@ Windows CPU and CUDA builds disable both MSI CAB and NSIS compression in `src-ta
 - Desktop editions use `bun run tauri:cuda`, `bun run tauri:migraphx`, and `bun run tauri:coreml`. Each downloads SHA256-pinned upstream packages and stages the required user-space libraries locally; Linux MIGraphX uses a standalone plugin built against ORT 1.30.0 in the same process; packaging requires ROCm 7.2.1 development packages, CMake 4.2+, Ninja, patch, and patchelf and includes HIPRTC and GPU kernel data. CI stages the same packages and uploads each built app as a separate 7-day artifact. See README for details.
 
 - Android: `cargo ndk` targets `aarch64-linux-android` etc., with explicit `xnnpack`/`nnapi` features when needed. iOS: `aarch64-apple-ios`, with explicit `coreml` when needed. CoreML is not enabled automatically. See `README.md` for SDK setup.
-- Generated projects under `src-tauri/gen/` are ignored. iOS config sets minimum version 15.1; set `bundle.iOS.developmentTeam` to your own signing team before building.
+- Generated projects under `src-tauri/gen/` are ignored. iOS config sets minimum version 16.4; set `bundle.iOS.developmentTeam` to your own signing team before building.
 - CI builds Android ARM64 APK/AAB on `master` pushes, pull requests, and manual runs. Packages are signed when `ANDROID_KEY_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and `ANDROID_STORE_PASSWORD` repository secrets are available; otherwise they are unsigned. Fork PRs do not receive those secrets. Unsigned APKs must be signed before installation.
 - CI builds an unsigned iOS ARM64 Release IPA using `--features coreml --no-sign`. AltStore Classic signs it during sideloading, so no iOS signing secrets are required. Mobile artifacts are retained for seven days; device inference validation remains manual.
 - Pinned 1B INT4 graph/data/tokenizer use about 0.88 GB disk. Allow additional download space and roughly 2–3 GB RAM for inference (4 GB+ device recommended).

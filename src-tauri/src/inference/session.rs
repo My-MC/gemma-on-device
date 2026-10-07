@@ -19,6 +19,8 @@ pub struct ModelInfo {
 
 /// Shared app state for Tauri
 pub struct AppState {
+    pub hf_session: Mutex<Option<super::huggingface::LoadedModel>>,
+    pub hf_download: Mutex<()>,
     pub session: Arc<Mutex<Option<InferenceSession>>>,
     pub model_integrity: tokio::sync::OnceCell<()>,
     pub model_dir: PathBuf,
@@ -61,6 +63,8 @@ pub fn preferred_execution_provider() -> &'static str {
 impl AppState {
     pub fn new(model_dir: PathBuf, runtime_dir: PathBuf) -> Self {
         Self {
+            hf_session: Mutex::new(None),
+            hf_download: Mutex::new(()),
             session: Arc::new(Mutex::new(None)),
             model_integrity: tokio::sync::OnceCell::new(),
             model_dir,

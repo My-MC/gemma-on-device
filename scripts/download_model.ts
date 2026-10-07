@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
+
 /**
- * Download Gemma ONNX models for gemma-on-device validation.
+ * Download the default LFM2.5 ONNX model, or an explicit legacy Gemma variant.
  * Usage:
- *   bun run download:model              # default 1B INT4
+ *   bun run download:model              # default LFM2.5 350M Q4
  *   bun run download:model:1b           # 1B INT4
  *   bun run download:model:3n           # 3n E2B INT4
  *   bun scripts/download_model.ts --variant 1b-int4 --out models
@@ -10,6 +11,10 @@
  * Requires HF_TOKEN for gated Gemma models if using source repos.
  * For onnx-community, no token needed for the pre-converted ONNX.
  */
+
+import { mkdir, rename } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import defaultModel from "../src/default-model.json";
 
 type Variant = "1b-int4" | "1b-int8" | "3n-e2b-int4";
 
@@ -139,16 +144,53 @@ async function downloadFile(
   }
 }
 
+async function downloadDefault(outDir: string, token?: string) {
+  const { repo, revision, graph, dtype, sha256 } = defaultModel;
+  const source = { repo, revision, graph, dtype };
+  const identity = new Bun.CryptoHasher("sha256")
+    .update(`${repo}@${revision}:${graph}`)
+    .digest("hex");
+  const root = join(outDir, "huggingface", identity);
+  console.log(
+    `Download ${defaultModel.name} Q4 (${defaultModel.size}) -> ${root}`,
+  );
+  for (const [file, hash] of Object.entries(sha256)) {
+    const dest = join(root, file);
+    await mkdir(dirname(dest), { recursive: true });
+    await downloadFile(
+      `https://huggingface.co/${repo}/resolve/${revision}/${file}`,
+      dest,
+      hash,
+      token,
+    );
+  }
+  const part = join(root, "manifest.part");
+  await Bun.write(part, JSON.stringify({ source, files: sha256 }, null, 2));
+  await rename(part, join(root, "manifest.json"));
+  console.log("Ready for native ort inference: bun run tauri dev");
+}
+
 async function main() {
   const args = process.argv.slice(2);
-  const variantArg =
-    args.find((a) => a.startsWith("--variant="))?.split("=")[1] ??
-    args[args.indexOf("--variant") + 1];
-  const outArg =
-    args.find((a) => a.startsWith("--out="))?.split("=")[1] ??
-    args[args.indexOf("--out") + 1];
-  const variant: Variant = (variantArg as Variant) ?? "1b-int4";
+  const valueFor = (flag: string) => {
+    const inline = args.find((arg) => arg.startsWith(`${flag}=`));
+    if (inline) return inline.slice(flag.length + 1);
+    const index = args.indexOf(flag);
+    if (index < 0) return undefined;
+    const value = args[index + 1];
+    if (!value || value.startsWith("--"))
+      throw new Error(`Missing value for ${flag}`);
+    return value;
+  };
+  const variantArg = valueFor("--variant");
+  const outArg = valueFor("--out");
   const outDir = outArg ?? "models";
+  const token = process.env.HF_TOKEN || process.env.HUGGING_FACE_HUB_TOKEN;
+  if (!variantArg || variantArg === defaultModel.id) {
+    await downloadDefault(outDir, token);
+    return;
+  }
+  const variant = variantArg as Variant;
 
   if (!(variant in VARIANTS)) {
     console.error(
@@ -158,7 +200,6 @@ async function main() {
   }
 
   const cfg = VARIANTS[variant];
-  const token = process.env.HF_TOKEN || process.env.HUGGING_FACE_HUB_TOKEN;
   console.log(`\n[gemma-on-device] Download ${variant}: ${cfg.desc}`);
   console.log(`  repo: ${cfg.repo}`);
   console.log(`  out:  ${outDir}/`);

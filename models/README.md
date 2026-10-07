@@ -1,23 +1,55 @@
 # models/
 
-Gemma ONNX models for `ort` validation.
+ONNX models for native Rust `ort` inference. The default is **LFM2.5 350M Q4**, released in March 2026, supporting Japanese, and about 280 MB for external weights.
 
-## Expected files (AppState)
+## Initial catalog
 
-Real inference currently uses the default 1B INT4 files:
+The first cards offer different model series rather than several Gemma variants. A card selects the model used for download/preparation, inference, and benchmarks. The existing repository selector also supports added models.
+
+| Model | ONNX repository | Q4 download size |
+| --- | --- | --- |
+| LFM2.5 350M (default) | `onnx-community/LFM2.5-350M-ONNX` | about 280 MB |
+| Qwen3 0.6B | `onnx-community/Qwen3-0.6B-ONNX` | about 920 MB |
+| Bonsai 1.7B | `onnx-community/Bonsai-1.7B-ONNX` | about 1.1 GB |
+| SmolLM3 3B | `HuggingFaceTB/SmolLM3-3B-ONNX` | about 2.7 GB |
+| LFM2.5 1.2B Instruct | `LiquidAI/LFM2.5-1.2B-Instruct-ONNX` | about 760 MB |
+
+The SmolLM3 graph is pinned to `af50613703fb6f10ffcb21b27ad48edcb8334232`, with graph SHA256 `bbb931d4f86cd3159af7de66a591b2263acccf80eb938c05dd89fff22baf051d` and external weight SHA256 `0f0210cbef6a3eea54d19adff2d25e1626bce4ae5f22c34b9bd3067b1417a488`. Its `input_ids`, masks, positions, `past_key_values.*`, `logits`, and `present.*` schema was checked against the native decoder. Real SmolLM3 inference has not been exercised; allow for its larger download and device memory requirements. Its source declares Apache-2.0. Legacy Gemma controls are collapsed in a separate compatibility section.
+
+## Default model
+
+Source: `onnx-community/LFM2.5-350M-ONNX`, commit `2c07371c2e84776cad597f3d813b7d306d292aea`, graph `onnx/model_q4.onnx`. `src/default-model.json` is shared by the UI, native backend, and Bun downloader. Run `bun run download:model` or use **ダウンロードして準備** on the first model card. Generation and benchmarking use LFM2.5 on first launch. Other ONNX selections are remembered.
+
+Files live under `models/huggingface/<sha256(repo@revision:graph)>/`, preserving the `onnx/` subdirectory and external weights. The CLI creates the same `manifest.json` as the native downloader; every recorded file is SHA256-verified before loading. Missing files trigger real downloads; the default never returns mock output. Model terms: [LFM Open License v1.0](https://huggingface.co/LiquidAI/LFM2.5-350M/blob/main/LICENSE).
+
+| File | SHA256 |
+| --- | --- |
+| `onnx/model_q4.onnx` | `d1a705712e93aafaba1346b32245fa59e7857a46e2272003c0e8c524977e0de8` |
+| `onnx/model_q4.onnx_data` | `71ec6ad38a4c463dcb3dba671d06a1d9861be3a23e51290d818b95c0b7d2a5db` |
+| `tokenizer.json` | `29d43b4be8e8a896fefd7cd836ca6d6b4eedd249f823866ce0453b368e646f49` |
+| `config.json` | `544d8d604bacf4cb89383c49c9a54621afa26a6741f3f55fd8b840ca1d640419` |
+| `tokenizer_config.json` | `95c85d0860d06c9529345f386004e8e67743375b15c5d39e9f46427d8977577b` |
+| `generation_config.json` | `94bfac0e1c207691baf4e172389a8efb114f8b60eb3a5c07a2f418aefa8f8bb6` |
+| `chat_template.jinja` | `013eed60546434b6967e3483153d8c5c37abcb1d667f8b1f914683f2a9411531` |
+
+Additional Hugging Face models use native Rust `ort`. Enter a public repository ID or URL, select a graph, then download and prepare it. Files are isolated under `models/huggingface/<identity>/`, preserving graph-relative external tensor paths. Each model has its own tokenizer and `manifest.json` with the pinned commit and file SHA256 digests. Every file is verified before preparation; saved manifests support offline use. LFS files use Hub SHA256 metadata. Non-LFS metadata/tokenizer files are checked against their Git blob digest before SHA256 is recorded.
+
+The generic text decoder handles standalone causal graphs with `input_ids`/`logits`, optional masks and positions, and standard `past_key_values.*`/`present.*` cache tensors. Split embedding/vision graphs and other input conventions require native adapters and produce compatibility errors. Browser-only inference and image preparation have been removed.
+
+## Legacy Gemma files (explicit selection only)
+
+The legacy Gemma path uses these 1B INT4 files; the default and other ONNX models use isolated directories:
 - `models/gemma-3-1b-it-int4.onnx` (+ `models/model_q4.onnx_data` kept literal) — Phase1
 - `models/tokenizer.json` — 1B tokenizer (SentencePiece)
 
 INT8 (`gemma-3-1b-it-int8.onnx`, single-file graph) and 3n (`gemma-3n-E2B-it-int4.onnx` + `decoder_model_merged_q4.onnx_data`) are downloadable experimental variants. Downloading them does not switch the inference model. Both write to the same `tokenizer.json` destination; 3n's tokenizer has a different hash.
 
-Missing default graph/tokenizer → **MOCK mode** for UI validation. Once both exist, the app attempts real inference and returns errors on that path. Downloaders verify hashes, but the inference path does not re-verify files before loading; manually verify files copied or changed outside the downloader. Status commands check graph/tokenizer existence only; they do not verify integrity or external data readiness.
+Missing legacy Gemma graph/tokenizer → **MOCK mode** only on the explicitly selected legacy route. Once both exist, that route attempts real inference and returns errors. Its status commands check graph/tokenizer existence only; they do not certify integrity or external data readiness.
 
-## Download via Bun (recommended)
+## Download legacy Gemma via Bun
 
 ```bash
 # 1B INT4 (fastest, community ONNX, no HF_TOKEN usually needed)
-bun run download:model
-# or
 bun run download:model:1b
 
 # 3n E2B INT4 (if available)
@@ -76,7 +108,7 @@ Notes:
 - The repo publishes **no** `model_int4.*`; the INT4 build is named `model_q4.*` (MatMulNBits 4-bit).
 - `model_int8.onnx` is a **single-file** graph — there is no `model_int8.onnx_data`.
 - The two repos ship slightly different tokenizers; downloading a variant overwrites the shared `models/tokenizer.json`. Re-downloading the other variant re-verifies and swaps it back.
-- Gemma 3n's merged decoder expects `inputs_embeds`; its embedding pipeline and model selection are not implemented. Generation still uses the default 1B paths. Re-download 1B to restore its tokenizer after a 3n download; restart an app that already cached a session after replacing model files.
+- Gemma 3n's merged decoder expects `inputs_embeds`; its embedding pipeline is not implemented. Explicit legacy generation uses the 1B paths. Re-download 1B to restore its tokenizer after a 3n download; restart an app that already cached a session after replacing model files.
 
 Flow in `download.rs`:
 
@@ -104,4 +136,4 @@ Because `models/` is `.gitignored`, every Git worktree gets its own empty `model
 
 3. **Use `app_data_dir` for mobile.** On Android and iOS, `resolve_model_dir_for_app` stores models in the app sandbox (`app_data_dir/models`), so no worktree duplication happens there.
 
-SHA256 verification is required no matter which option you use. The Rust downloader deletes and re-downloads invalid existing files; the inference path does not verify or repair them. Project `models/` is preferred only by non-mobile debug builds; release/mobile builds use app data.
+SHA256 verification is required no matter which option you use. Default and additional HF model manifests are verified before preparation; a corrupt saved file causes an error. The legacy downloader can repair invalid files. Project `models/` is preferred only by non-mobile debug builds; release/mobile builds use app data.

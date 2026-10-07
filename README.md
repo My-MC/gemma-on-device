@@ -1,6 +1,6 @@
 # Gemma On Device — ort × Tauri × React (Bun)
 
-A Tauri application to validate whether Rust `ort` (ONNX Runtime) can run Gemma mobile models across platforms, with in-app model download, streaming inference, and benchmarking. CI builds desktop and mobile packages; device/GPU inference validation requires manual checks.
+A Tauri application for cross-platform inference with native Rust `ort` (ONNX Runtime), with in-app model download, streaming inference, and benchmarking. The default is LFM2.5 350M Q4 (about 280 MB), released in March 2026 and supporting Japanese. CI builds desktop and mobile packages; device/GPU inference validation requires manual checks.
 
 - **Product name**: `Gemma On Device` / **Package name**: `gemma-on-device` / **Identifier**: `com.gemmaondevice.app`
 - **Validation goal**: whether `ort` can run Gemma ONNX on each OS / execution provider, and to quantify speed / memory / compatibility
@@ -18,9 +18,11 @@ A Tauri application to validate whether Rust `ort` (ONNX Runtime) can run Gemma 
 | Frontend | `React` | `^19.3.0` + `react-dom ^19.3.0` | UI |
 | Frontend | `Vite` | `^8.3.0` + `@vitejs/plugin-react ^6.1.1` | Build, `devUrl http://localhost:1420` |
 | Frontend | `TypeScript` | `~7.0.2` | Types |
+| UI | `shadcn/ui` | `^4.21.3` + `radix-ui ^1.7.0` | Accessible, customizable components |
+| UI styling | `Tailwind CSS` | `^4.3.3` + `@tailwindcss/vite ^4.3.3` | Design tokens and utility styling |
 | Tauri JS | `@tauri-apps/api` `cli` | `2.12` | `invoke` / `listen` / `emit` |
 | Tauri JS plugin | `@tauri-apps/plugin-opener` | `2.7` | Open URLs and files |
-| Models | Gemma 3 1B INT4 / 3n E2B INT4 | `onnx-community` | Community ONNX, INT4 quantized |
+| Models | LFM2.5 350M Q4 (default), public Hugging Face ONNX graphs, legacy Gemma 3 | Hugging Face | Native Rust `ort` inference; adapters for graph input contracts |
 
 **JS execution**: `package.json:scripts` call `vite` directly and are run via `bun run dev` / `bun run build`. Do not use `bunx --bun vite`.
 
@@ -45,15 +47,21 @@ Dependency manifests and lockfiles are the version sources; Bun 1.3.14 is the ve
                                                                                  │
                                                                     ort Session  │  onnx: models/gemma-*.onnx
                                                                     + EPs        ▼
-                                                                    CPU / DirectML / CUDA / CoreML / NNAPI
+CPU / DirectML / CUDA / CoreML / NNAPI
 ```
 
-**Inference fallback**: if the default 1B INT4 graph or tokenizer is missing, the app validates the UI pipeline via `mock_generate`. Real inference uses the graph, `model_q4.onnx_data`, and the 1B tokenizer; errors on that path are returned to the caller. Downloading INT8 or 3n does not switch the inference model. Model status checks graph/tokenizer existence only, and the inference path does not re-verify hashes before loading. Manually verify files copied or changed outside the downloader.
+All inference uses native Rust `ort`. `src/inference.ts` invokes Tauri commands for Hugging Face discovery, download, loading, and generation. Files are stored in the app's model directory and remain usable offline after a successful download.
+
+**Inference and integrity**: the default LFM2.5 route downloads missing files, verifies its SHA256 manifest, and runs real inference. Download or compatibility failures return errors. The explicitly selected legacy Gemma route can use `mock_generate` if its graph/tokenizer is missing; its status commands check file presence only. Downloading legacy INT8 or 3n does not switch the default model.
 
 **Model paths**:
 
 - Desktop debug builds: existing project `models/` resolved by `resolve_model_dir()` is preferred.
 - Desktop release / Mobile: `app.path().app_data_dir().join("models")` via `src-tauri/src/lib.rs:resolve_model_dir_for_app()`. If app-data resolution fails, it falls back to `resolve_model_dir()`. Model binaries are ignored; see `models/README.md`.
+
+## UI Design
+
+The UI follows Material 3-inspired color roles, typography, spacing, layout, and responsive behavior. See [UI design guidelines](docs/ui-design-guidelines.md) for the component rules, Tailwind conventions, and visual verification checklist.
 
 ## Project Structure
 
@@ -65,9 +73,13 @@ Dependency manifests and lockfiles are the version sources; Bun 1.3.14 is the ve
 ├── index.html
 ├── src/
 │   ├── App.tsx               # In-app download, model matrix, inference, bench, system
-│   ├── App.css               # download-panel / progress-bar
+│   ├── AppSelect.tsx         # shared Japanese-font DOM listbox
+│   ├── index.css             # Tailwind and theme tokens
+│   ├── inference.ts          # Native Hugging Face Tauri command client
 │   ├── main.tsx
 │   └── assets/
+├── docs/
+│   └── ui-design-guidelines.md # Material 3-inspired UI and Tailwind conventions
 ├── src-tauri/
 │   ├── Cargo.toml            # gemma-on-device, ort, tokenizers, reqwest, tokio
 │   ├── tauri.conf.json       # productName, identifier, build.beforeDevCommand: bun run dev
@@ -173,26 +185,49 @@ Run `bun run check` and `bun run build` before committing frontend changes. CI r
 
 Downloads are **SHA256-verified** (see `models/README.md` and `CONTRIBUTING.md`). After streaming to a temporary `.part` file the hash is checked before atomic rename; on mismatch the file is deleted and the command fails.
 
+All selection menus use `src/AppSelect.tsx` and the bundled Noto Sans JP font, including their option lists. They render inside the application instead of an OS-native popup, so Japanese options do not depend on fonts installed in WSL or the host. Arrow keys, Home/End, Enter/Space, Escape, and Tab are supported.
+
+**Default and additional ONNX models**: LFM2.5 350M Q4 is selected on first launch. Choose **ダウンロードして準備**, or generate directly to acquire it automatically. Other public repositories can be added by ID or URL. The backend pins the commit, inspects graph-relative external tensor dependencies, and saves each model under `models/huggingface/<identity>/` with its own tokenizer and SHA256 manifest. LFS files use Hub SHA256 digests; small Git files are checked against their Git blob digest before SHA256 is recorded. Every saved file is verified before preparation. Private and gated repositories are not supported. The shared definition in `src/default-model.json` supplies the UI, backend default, and CLI downloader. The original product/package name remains for compatibility.
+
+The [official LFM2.5 350M model card](https://huggingface.co/LiquidAI/LFM2.5-350M) describes its Japanese support and intended on-device use. Its small size makes it suitable for initial runtime validation; larger instruction models remain selectable. The model uses the LFM Open License v1.0.
+
+The shared text decoder handles `input_ids`, optional masks and positions, `logits`, full-sequence generation, and standard `past_key_values.*` → `present.*` cache tensors. Native cache outputs are retained without Gemma-specific layer counts; float32/float16 caches and logits are supported. Tokenization, EOS tokens, Jinja chat templates, and temperature come from the selected model and generation options. Native execution-provider selection and CPU fallback apply to both model sources.
+
+ONNX graph execution is the common backend. Split embedding/vision graphs, encoder/decoder pipelines, and other input conventions require native adapters and report the required input. The previous browser-only Gemma 4 image flow has been removed. The initial model cards show LFM2.5 350M, Qwen3 0.6B, Bonsai 1.7B, and SmolLM3 3B before the larger LFM2.5 variant, so different series appear first. Select a card to use that model for preparation, generation, and benchmarking. Legacy Gemma 3/3n controls are collapsed on the model management page. LFM convolution state tensors and `num_logits_to_keep` are handled alongside standard KV caches. Other repositories can be discovered by ID. SmolLM3 Q4 weights use about 2.7 GB; its graph schema has been checked against the decoder, but real inference and target-device memory requirements have not been validated.
+
+The opt-in smoke check downloads small pinned GPT-2, Phi, and Gemma exports and verifies real native inference, streaming, session reuse, and integrity rejection:
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml downloaded_hf_native_smoke -- --ignored --nocapture
+```
+
+It requires network access and does not validate physical-device GPU acceleration.
+
+To validate a real LFM model, including its chat template and external weights (about 280 MB):
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml lfm_hf_native_smoke -- --ignored --nocapture
+```
+
 **From the UI (recommended)**:
 
 1. Start the app with `bun run tauri dev`
-2. **Models** → **Download from UI** → select variant
-   - `1b-int4` (recommended, ~0.88 GB including tokenizer, `onnx-community/gemma-3-1b-it-ONNX`)
-   - `1b-int8` / `3n-e2b-int4` (experimental)
-3. **Download model** → per-file progress bars (`download-progress` event). Only the default 1B INT4 files are used for generation. Completion/status does not certify inference readiness; the Rust downloader can continue after a failed 3n external-data download.
+2. **ONNXモデル** → keep **LFM2.5 350M** selected → **ダウンロードして準備**.
+3. Generate or benchmark using the selected ONNX model. SHA256 verification and native session preparation must succeed; the default path reports errors instead of returning mock output.
 
 Downloading 3n replaces the shared `tokenizer.json` with a different tokenizer. Re-download 1B before 1B inference. Restart an app that already cached a session after replacing model files.
 
 **CLI**:
 
 ```bash
-bun run download:model        # 1b-int4
-bun run download:model:1b     # same
-bun run download:model:3n     # 3n-e2b
+bun run download:model        # LFM2.5 350M Q4, pinned commit + SHA256 manifest
+bun scripts/download_model.ts --out models # same, explicit destination
+bun run download:model:1b     # legacy Gemma 3 1B
+bun run download:model:3n     # experimental legacy 3n-e2b
 bun scripts/download_model.ts --variant 1b-int4 --out models
 ```
 
-**Manual**:
+**Legacy Gemma manual acquisition**:
 
 - https://huggingface.co/onnx-community/gemma-3-1b-it-ONNX
   - `onnx/model_q4.onnx` → `models/gemma-3-1b-it-int4.onnx`
@@ -208,14 +243,16 @@ sha256sum models/tokenizer.json
 # compare all three with expected hashes in models/README.md
 ```
 
-`models/` is `.gitignore`d. The app works in mock mode without models for UI validation.
+`models/` is `.gitignore`d. Mock output is available only through the explicit legacy Gemma route when its files are missing. The default LFM route downloads and runs the real model.
 
 ### Inference / Bench
 
+The context window defaults to **4096 tokens** and accepts any positive integer in the UI (for example, 8192, 32768, or 131072), without a fixed application ceiling. It counts tokenized input (including the chat template) plus output. Generation defaults to **2048 new tokens**, with a configurable maximum of **4096**. The backend caps generation to the remaining window and the selected model's declared context capacity; an input that fills the window returns an error rather than being silently truncated. EOS may end generation earlier. API callers can supply `contextLength` alongside `maxTokens`, or `context_length` in `generate_hf` options. Larger windows retain more cache state and can increase device memory usage.
+
 **UI**:
 
-- Enter a prompt → **Generate (single)** calls `invoke("generate")`, **Generate (stream)** calls `invoke("generate_stream")` → `listen("token")` + `listen("generation-complete")` for incremental display (`src/App.tsx`)
-- **Run bench** → `bench_inference` shows `avg tok/s` / `avg latency`
+- Enter a prompt → generate with `generate_hf` for the selected model, listening to native `token` events for streaming. The `generate` / `generate_stream` commands also use LFM2.5 by default; explicit legacy commands are `generate_gemma` / `generate_stream_gemma`.
+- **Run bench** measures native generation for the selected model. The `bench_inference` command defaults to LFM2.5; `legacyGemma: true` selects the original pipeline.
 - The header shows the execution provider selected for the current generation or benchmark, updates when inference falls back to another provider, and distinguishes preparing, mock execution, and the last completed runtime. The static EP list at the bottom is removed.
 
 **CLI**:
@@ -314,7 +351,7 @@ Non-mobile debug builds prefer existing project `models/` for compatibility with
 bun run tauri android init
 bun run tauri android dev
 
-# iOS 15.1+ (requires Xcode, macOS only)
+# iOS 16.4+ (requires Xcode, macOS only)
 rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
 brew install xcodegen libimobiledevice cocoapods
 bun run tauri ios init
@@ -332,7 +369,7 @@ iOS creates an unsigned ARM64 release IPA without signing secrets. Download the 
 
 The generated Xcode project lives in `src-tauri/gen/apple`. Set
 `bundle.iOS.developmentTeam` in `src-tauri/tauri.conf.json` to the team reported
-by `bun run tauri info` for signed builds. `src-tauri/tauri.conf.json` sets minimum iOS version 15.1. The generated project is ignored; after initialization, verify that its deployment settings still specify 15.1 before building.
+by `bun run tauri info` for signed builds. `src-tauri/tauri.conf.json` sets minimum iOS version 16.4 to match the frontend browser requirements. The generated project is ignored; after initialization, verify that its deployment settings still specify 16.4 before building.
 
 For a physical device, connect and unlock the iPhone, trust the Mac, enable
 Developer Mode, and confirm that it appears under `xcrun xctrace list devices`.
@@ -348,7 +385,7 @@ Execution providers in `src-tauri/Cargo.toml`:
 - Android: `nnapi` / `xnnpack`
 - iOS: `coreml` requires an explicit Cargo feature (enabled in CI, GPU + CPU fallback)
 
-Memory estimate: 1B INT4 files total about 0.88 GB on disk + roughly 2–3 GB RAM at inference → 4 GB+ device recommended. `3n-e2b` is downloadable, but its embedding pipeline is not implemented.
+Default LFM2.5 Q4 weights use about 280 MB on disk. Measure actual memory and acceleration on each target device. Legacy 1B INT4 files use about 0.88 GB on disk and roughly 2–3 GB RAM at inference. The legacy `3n-e2b` embedding pipeline is not implemented.
 
 ## Tauri Commands
 
@@ -390,7 +427,7 @@ Parallel worktrees must avoid port collisions. Set `VITE_PORT`, `VITE_HMR_PORT`,
 
 For Tauri desktop dev in a worktree, use `scripts/worktree-dev.ts`. It reads `VITE_PORT`, writes a temporary JSON Merge Patch to `src-tauri/tauri.worktree.conf.json` that overrides only `build.devUrl`, and runs `tauri dev --config src-tauri/tauri.worktree.conf.json`. The generated patch file is gitignored, so do not commit it.
 
-Models live in each worktree's own `models/` directory. You can download per worktree with `bun run download:model`, or save disk space by symlinking `models/` to a trusted shared external directory holding verified ONNX files and `tokenizer.json`. The inference path does not re-verify hashes; manually check files copied or changed outside the downloader.
+Models live in each worktree's own `models/` directory. Download per worktree with `bun run download:model`, or symlink `models/` to a trusted shared external directory. Default and additional Hugging Face models verify all manifest hashes before preparation; legacy files copied outside the downloader require manual verification.
 
 Mobile generated directories under `src-tauri/gen/` are also per-worktree. After creating a worktree, regenerate mobile projects with `bun run tauri ios init` or `bun run tauri android init` before running `bun run tauri ios dev` or `bun run tauri android dev`.
 
@@ -439,7 +476,7 @@ bun run build  # also runs tsc
 ## License
 
 This repository's original code is licensed under the MIT License; see `LICENSE`. Third-party dependencies and assets retain their own licenses. Gemma models are subject to the Gemma Terms of Use; ONNX Runtime is MIT.
-The app's footer opens the license viewer for JavaScript and Rust dependencies, bundled runtime license files, and the downloadable Gemma model variants. Model entries show the Gemma license notice, ONNX model source, and a link to Google's current full terms. License data is generated for the active target and Cargo features during development and builds. Set `GEMMA_CARGO_FEATURES` to match any extra features passed to Tauri. Run `bun run licenses:generate` to refresh the report; missing license identifiers or texts stop generation.
+The app's footer opens the license viewer for JavaScript and Rust dependencies, bundled runtime license files, the default LFM2.5 model, and legacy Gemma variants. Model entries include the source and a link to the respective official license. License data is generated for the active target and Cargo features during development and builds. Set `GEMMA_CARGO_FEATURES` to match any extra features passed to Tauri. Run `bun run licenses:generate` to refresh the report; missing license identifiers or texts stop generation.
 
 ## Development Notes
 
