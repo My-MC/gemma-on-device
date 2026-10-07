@@ -304,6 +304,8 @@ GPU CI checks free space before removing unused runner SDKs: 16 GiB for CUDA and
 
 Linux desktop CI uses sccache 0.18.0 for Rust Release builds alongside the existing Cargo target cache. The wrapper is enabled after Cargo cache restoration (and after check/clippy/fmt in the CPU job), retaining the existing Cargo cache keys. Compiler results use the GitHub Actions backend with the stable `gemma-desktop-rust-v1` namespace; feature/compiler inputs distinguish entries, allowing compatible results to be shared across editions. The action reports cache statistics in its post-job step. Windows/macOS and mobile builds keep their existing caching; standalone MIGraphX C++ compilation continues to use its verified completed-plugin cache.
 
+Long Python CI routines live in `scripts/`: `identify_migraphx_build_environment.py` generates the native plugin cache identity, and `configure_android_signing.py` updates the generated Android Gradle signing configuration. Short Python checks use `shell: python`. See `CONTRIBUTING.md` for local execution and debugging prerequisites.
+
 CoreML targets macOS 14 or newer on Apple Silicon. CoreML uses CPU and GPU where supported; unsupported graph nodes can fall back to CPU. Set `GEMMA_COREML_PROFILE=1` when launching the app to log per-operator hardware assignment. The WebGPU provider remains bundled in each GPU edition for fallback.
 
 Thresholds: desktop 5 tok/s / mobile 2 tok/s (INT4).

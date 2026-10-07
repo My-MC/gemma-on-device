@@ -211,6 +211,8 @@ cargo test --manifest-path src-tauri/Cargo.toml downloaded_hf_native_smoke -- --
 
 ## Documentation
 
+Keep long CI Python routines in `scripts/` and invoke them from the workflow; use `shell: python` for short, self-contained checks. Run helpers from the repository root. `python3 scripts/identify_migraphx_build_environment.py` requires the MIGraphX build tools/packages and `GITHUB_OUTPUT`; `python3 scripts/configure_android_signing.py` edits the initialized Android Gradle project and expects CI to create `keystore.properties` first. Both can be debugged locally with `python3 -m pdb scripts/<name>.py`.
+
 - Update `README.md`, `AGENTS.md`, and `CONTRIBUTING.md` whenever workflow, quality gates, model handling, or tech stack changes.
 - `AGENTS.md` — agent operational rules (summary of this file).
 - `models/README.md` — model variants, sizes, download instructions, expected SHA256 hashes.

@@ -125,25 +125,7 @@ jobs:
       - name: Identify MIGraphX build environment
         if: matrix.edition == 'migraphx'
         id: migraphx-build
-        run: |
-          python3 - <<'PY'
-          import hashlib, json, os, pathlib, shlex, subprocess
-          lock = json.loads(pathlib.Path('scripts/runtime_lock.json').read_text())
-          packages = subprocess.check_output(['dpkg-query', '-W', '-f=${binary:Package}=${Version}\n'], text=True)
-          environment = {
-              'cmake': subprocess.check_output(['cmake', '--version'], text=True),
-              'compiler': subprocess.check_output([*shlex.split(os.environ.get('CXX') or 'c++'), '--version'], text=True),
-              'c_compiler': subprocess.check_output([*shlex.split(os.environ.get('CC') or 'cc'), '--version'], text=True),
-              'flags': {name: os.environ.get(name, '') for name in ('CC', 'CXX', 'CFLAGS', 'CXXFLAGS', 'LDFLAGS')},
-              'packages': sorted(line for line in packages.splitlines() if line.startswith(('migraphx', 'hip', 'rocm', 'hsa-rocr', 'comgr', 'rocblas', 'miopen'))),
-          }
-          inputs = {name: lock[name] for name in ('ort', 'rocm_version', 'migraphx_plugin')}
-          inputs['spec'] = json.loads(pathlib.Path('scripts/migraphx_build_spec.json').read_text())
-          inputs['patches'] = {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in sorted(pathlib.Path('scripts/patches').glob('migraphx*'))}
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              for name, value in (('identity', environment), ('inputs', inputs)):
-                  output.write(f'{name}={hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()}\n')
-          PY
+        run: python scripts/identify_migraphx_build_environment.py
       - name: Cache compiled MIGraphX plugin
         if: matrix.edition == 'migraphx'
         uses: actions/cache@v6
@@ -177,8 +159,8 @@ jobs:
           GEMMA_PLUGIN_TEST_RUNTIME: ${{ github.workspace }}/target/release/ort-runtime
       - name: Verify AMD installer system dependencies
         if: matrix.edition == 'migraphx'
+        shell: python
         run: |
-          python - <<'PY'
           import pathlib, subprocess
           bundles = list(pathlib.Path('target/release/bundle/deb').glob('*.deb'))
           assert bundles, 'MIGraphX deb is missing'
@@ -186,7 +168,6 @@ jobs:
               dependencies = subprocess.check_output(['dpkg-deb', '--field', str(bundle), 'Depends'], text=True)
               for required in ('libnuma1', 'libdrm-amdgpu1', 'libelf1', 'libwebkit2gtk-4.1-0'):
                   assert required in dependencies, f'{bundle} is missing {required}'
-          PY
       - name: Verify CPU fallback without GPU plugins
         if: matrix.edition == 'migraphx'
         run: cargo test --release --manifest-path src-tauri/Cargo.toml --features desktop-migraphx migraphx_unavailable_falls_back_to_cpu -- --ignored
@@ -374,38 +355,7 @@ jobs:
             printf 'password=%s\n' "$ANDROID_STORE_PASSWORD"
             printf 'storeFile=%s\n' "$RUNNER_TEMP/android-release.jks"
           } > src-tauri/gen/android/keystore.properties
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path("src-tauri/gen/android/app/build.gradle.kts")
-          source = path.read_text()
-          android_block = "android {\n"
-          release_block = '        getByName("release") {\n'
-          if android_block not in source or release_block not in source:
-              raise SystemExit(f"Android Gradle signing blocks not found in {path}")
-          signing = '''val keystorePropertiesFile = rootProject.file("keystore.properties")
-          val keystoreProperties = java.util.Properties().apply {
-              keystorePropertiesFile.inputStream().use { load(it) }
-          }
-
-          android {
-              signingConfigs {
-                  create("release") {
-                      keyAlias = keystoreProperties["keyAlias"] as String
-                      keyPassword = keystoreProperties["keyPassword"] as String
-                      storeFile = file(keystoreProperties["storeFile"] as String)
-                      storePassword = keystoreProperties["password"] as String
-                  }
-              }
-          '''
-          source = source.replace(android_block, signing, 1)
-          source = source.replace(
-              release_block,
-              release_block + '            signingConfig = signingConfigs.getByName("release")\n',
-              1,
-          )
-          path.write_text(source)
-          PY
+          python3 scripts/configure_android_signing.py
       - name: Build Android APK and AAB
         run: bun run tauri android build --ci --target aarch64 --features nnapi --apk --aab
       - name: Upload Android packages
