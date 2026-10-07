@@ -28,12 +28,13 @@ def digest(path: Path) -> str:
 
 
 def fetch(package: dict) -> Path:
-    CACHE.mkdir(parents=True, exist_ok=True)
-    target = CACHE / Path(package["url"]).name
+    downloads = CACHE / "downloads"
+    downloads.mkdir(parents=True, exist_ok=True)
+    target = downloads / Path(package["url"]).name
     if target.exists() and digest(target) == package["sha256"]:
         return target
     target.unlink(missing_ok=True)
-    with tempfile.NamedTemporaryFile(dir=CACHE, delete=False) as temporary:
+    with tempfile.NamedTemporaryFile(dir=downloads, delete=False) as temporary:
         tmp = Path(temporary.name)
     try:
         request = urllib.request.Request(package["url"], headers={"User-Agent": "gemma-on-device-runtime-preparer"})
@@ -114,7 +115,8 @@ def main() -> None:
 
     if target.startswith("win32"):
         core = find_file(destination, lambda name: name.lower() == "onnxruntime.dll")
-        shutil.copy2(core, destination / "onnxruntime.dll")
+        if core.parent != destination:
+            shutil.move(core, destination / "onnxruntime.dll")
     elif target.startswith("linux"):
         core = find_file(destination, lambda name: name == "libonnxruntime.so.1.30.0")
         shutil.copy2(core, destination / "libonnxruntime.so")
@@ -132,7 +134,10 @@ def main() -> None:
     for name in required:
         found = find_file(destination, lambda candidate, expected=name: candidate == expected)
         if found.parent != destination:
-            shutil.copy2(found, destination / name)
+            if target.startswith("win32"):
+                shutil.move(found, destination / name)
+            else:
+                shutil.copy2(found, destination / name)
 
     if edition == "migraphx":
         migraphx_root = destination / "migraphx"

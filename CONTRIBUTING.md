@@ -158,6 +158,12 @@ Rules:
 
 `.github/workflows/ci.yml` enforces frontend Biome checks/build and desktop check/clippy/fmt on PRs to `master`, builds desktop bundles on Linux/Windows/macOS, Android ARM64 APK/AAB, and unsigned iOS ARM64 IPA. It also runs on `master` pushes and manual dispatch. Bundle artifacts are retained for seven days; device/GPU inference benchmarks are not automated. A PR with failing checks will not be merged.
 
+CI's Rust cache must use `. -> target` because the Cargo workspace lives at the repository root. GPU edition and provider-feature cache keys are separated to avoid matrix jobs saving incompatible feature sets under one key. Runtime download caches contain only `.cache/runtime-wheels/downloads`; each restored archive is checked against `scripts/runtime_lock.json`. The compiled MIGraphX cache contains only the plugin, its license, and a hash manifest, and is invalidated by the locked source/SDK/ROCm version, patches/build specification, and installed build environment. Do not cache expanded ROCm runtimes or the CMake build tree. Desktop upload paths must select completed installers rather than all of `target/release/bundle`. Run the offline cache validation tests after changing these scripts:
+
+```bash
+python3 -m unittest discover -s scripts -p test_runtime_cache.py
+```
+
 ## Model Management & SHA256 Verification
 
 The default LFM2.5 350M Q4 and additional Hugging Face models use native Rust `ort` through `huggingface.rs` and `decoder.rs`. `src/default-model.json` defines the default for the UI, backend, and `bun run download:model`; update its pinned revision and all hashes together with `models/README.md` when changing the default. Keep graph files, external tensors, and tokenizers isolated under `models/huggingface/<identity>/`. Record a pinned commit and SHA256 manifest after every required file is verified. Non-LFS metadata/tokenizer files must match their Hub Git blob digest before recording SHA256. Every saved file is re-verified before preparation. Add native adapters for new input conventions; unsupported graphs must return a compatibility error.
@@ -205,12 +211,22 @@ cargo test --manifest-path src-tauri/Cargo.toml downloaded_hf_native_smoke -- --
 
 ## Documentation
 
+Keep long CI Python routines in `scripts/` and invoke them from the workflow; use `shell: python` for short, self-contained checks. Run helpers from the repository root. `python3 scripts/identify_migraphx_build_environment.py` requires the MIGraphX build tools/packages and `GITHUB_OUTPUT`; `python3 scripts/configure_android_signing.py` edits the initialized Android Gradle project and expects CI to create `keystore.properties` first. Both can be debugged locally with `python3 -m pdb scripts/<name>.py`.
+
 - Update `README.md`, `AGENTS.md`, and `CONTRIBUTING.md` whenever workflow, quality gates, model handling, or tech stack changes.
 - `AGENTS.md` — agent operational rules (summary of this file).
 - `models/README.md` — model variants, sizes, download instructions, expected SHA256 hashes.
 - `src-tauri/capabilities/default.json` — `core:default` + `opener:default` for the `main` window. App commands are registered with `generate_handler!` in `src-tauri/src/lib.rs`.
 
+Desktop CPU bundles use `bun run tauri:desktop`; GPU edition commands use the same packaging helpers. Debian/RPM use zstd level 3, AppImage uses `LDAI_COMP=zstd`, and DMG uses LZFSE (ULFO). The Python packager requires Python 3.11+ and zstd-capable dpkg for Debian. Tests create and extract a real zstd Debian archive to verify resources, symlinks, permissions, licenses, and dependency metadata. The helper keeps Tauri's `/usr/lib/<productName>` runtime location. Plain Tauri builds retain the upstream Debian/DMG compression behavior.
+
+MIGraphX cache keys use the explicit `scripts/migraphx_build_spec.json` rather than hashing the entire builder or workflow. Keep all artifact-affecting CMake options in this specification; increment `cacheSchema` for builder behavior changes not covered by source/SDK, patches, toolchains, or flags. Parallel job counts are deliberately excluded. GPU CI removes unused SDKs only below its free-space threshold (16 GiB CUDA, 32 GiB MIGraphX), checking after each deletion.
+
+Linux desktop Release builds additionally use sccache 0.18.0 with the GitHub Actions backend. Enable `RUSTC_WRAPPER` after restoring the Cargo cache so its existing key remains stable; CPU check/clippy/fmt run before enabling the wrapper. Keep the `gemma-desktop-rust-v1` namespace stable across runs, changing it only to invalidate compiler-cache entries deliberately. Review the action's post-job hit/miss/error statistics when changing build flags or toolchains. Cargo artifacts and verified compiled MIGraphX plugins remain the first layer of caching.
+
 ## Execution Providers
+
+Windows CPU and CUDA builds disable both MSI CAB and NSIS compression in `src-tauri/tauri.windows.conf.json`, retaining both artifact formats. MSI uses the MIT-licensed Tauri CLI 2.12.0 template in `src-tauri/windows/main.wxs`; review the template on CLI upgrades. `scripts/prepare_runtime.py` moves Windows ORT core/provider DLLs to the runtime root before generating the hash manifest; do not retain duplicate originals or remove dependency DLLs/license files. Linux/macOS runtime layouts retain their versioned libraries. After changing runtime preparation, run `python3 -m unittest discover -s scripts -p test_prepare_runtime.py` (also run by CI). Verify CUDA/WebGPU inference on Windows after installation when validating a release; CI packaging alone does not establish GPU execution.
 
 - Providers in `src-tauri/Cargo.toml` are selected with Cargo features (`cuda`, `tensorrt`, `coreml`, `directml`, `nnapi`, `xnnpack`). Apple Silicon macOS builds include CoreML automatically with CPU fallback for unsupported nodes; other targets default to CPU unless configured.
 - Windows builds use `load-dynamic` and the SHA256-verified DLL staged by `scripts/download_ort_dll.ts`; Linux/macOS link the runtime. See `README.md` for provider details.
