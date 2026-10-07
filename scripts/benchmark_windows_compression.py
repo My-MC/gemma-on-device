@@ -33,17 +33,18 @@ def main():
         shutil.rmtree(output)
     output.mkdir()
     windows = {"nsis": {"compression": "zlib" if args.mode == "compressed" else "none"}}
-    if args.format == "msi" and args.mode == "none":
+    if args.format == "msi":
         with urllib.request.urlopen(TEMPLATE_URL) as response:
             data = response.read()
         if hashlib.sha256(data).hexdigest() != TEMPLATE_SHA256:
             raise RuntimeError("Pinned WiX template SHA256 mismatch")
         old = '<Media Id="1" Cabinet="app.cab" EmbedCab="yes" />'
-        new = '<Media Id="1" Cabinet="app.cab" EmbedCab="yes" CompressionLevel="none" />'
+        compression = "mszip" if args.mode == "compressed" else "none"
+        new = f'<Media Id="1" Cabinet="app.cab" EmbedCab="yes" CompressionLevel="{compression}" />'
         template = data.decode()
         if template.count(old) != 1:
             raise RuntimeError("Unexpected WiX template Media element")
-        path = results / "uncompressed.wxs"
+        path = results / f"{label}.wxs"
         path.write_text(template.replace(old, new), encoding="utf-8")
         windows["wix"] = {"template": str(path)}
     config = results / f"{label}.json"
