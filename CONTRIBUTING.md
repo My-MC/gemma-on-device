@@ -4,7 +4,7 @@ This guide defines the contributor workflow for `gemma-on-device` (`com.gemmaond
 
 ## Prerequisites
 
-- **Bun**: CI uses 1.3.14; install JS dependencies with Bun and keep `bun.lock` in sync with `package.json`.
+- **Bun**: CI uses 1.4.2; install JS dependencies with Bun and keep `bun.lock` in sync with `package.json`.
 - **Rust**: use the current stable toolchain with `clippy` and `rustfmt`, as CI does. The app manifest declares `rust-version = "1.77"`, but CI does not test that minimum against the current dependency lockfile.
 - Linux prerequisites for Tauri 2: `libwebkit2gtk-4.1-dev build-essential libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf pkg-config` (see `README.md`)
 - Optional for mobile: Android Studio + NDK + `cargo-ndk` (`aarch64-linux-android` etc.), Xcode for iOS

@@ -17,7 +17,7 @@ This file defines repository-specific operational rules for agents/contributors 
 Use `package.json`, `src-tauri/Cargo.toml`, and the lockfiles as the version sources. Update this summary when dependencies change.
 
 - **Rust**: `ort 2.0.0-rc.13` (`half` feature; resolved by `Cargo.lock`), `tokenizers 0.23`, `tauri 2.12`, `tauri-plugin-opener 2.7`, `tokio full`, `reqwest 0.12` (`rustls-tls` + `stream`), `anyhow`, `ndarray 0.17`. Execution providers are selected with Cargo features; Apple Silicon macOS builds include CoreML automatically.
-- **JS**: CI uses `Bun 1.3.14` (package manager + runtime); manifest versions are `React ^19.3.0`, `Vite ^8.3.0`, `@vitejs/plugin-react ^6.1.1`, `TypeScript ~7.0.2`, shadcn/ui with Radix, Tailwind CSS `^4.3.3`, `@tauri-apps/api ^2.12.0`, `@tauri-apps/plugin-opener ^2.7.0`, and `@tauri-apps/cli ^2.12.0`.
+- **JS**: CI uses `Bun 1.4.2` (package manager + runtime); manifest versions are `React ^19.3.0`, `Vite ^8.3.0`, `@vitejs/plugin-react ^6.1.1`, `TypeScript ~7.0.2`, shadcn/ui with Radix, Tailwind CSS `^4.3.3`, `@tauri-apps/api ^2.12.0`, `@tauri-apps/plugin-opener ^2.7.0`, and `@tauri-apps/cli ^2.12.0`.
 - **Build**: `vite.config.ts` reads `VITE_PORT` (default `1420`), `VITE_HMR_PORT` (default `1421`, used with `TAURI_DEV_HOST`), and `VITE_PREVIEW_PORT` (default `1420`); dev/preview use `strictPort`. `src-tauri/tauri.conf.json` owns `frontendDist: ../dist`, `devUrl: http://localhost:1420`, and `beforeDevCommand: bun run dev`.
 - **JS execution**: `package.json:scripts` call `vite` directly. Run with `bun run dev` / `bun run build`. Do NOT use `bunx --bun vite`.
 

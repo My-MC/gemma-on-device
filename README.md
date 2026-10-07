@@ -14,7 +14,7 @@ A Tauri application for cross-platform inference with native Rust `ort` (ONNX Ru
 | Rust | `tauri` | `2.12` + `tauri-build 2.7` | Desktop / mobile Rust backend |
 | Rust | `tokio` `futures` `reqwest` `tokio-util` | - | Async runtime + in-app download (`rustls-tls`) |
 | Rust | `serde` `anyhow` `ndarray` | - | IPC, errors, tensor creation (`[1, seq_len]` shape) |
-| JS runtime | `Bun` | `1.3.14` | Package manager and runtime (Node-compatible, `package.json:scripts` run `vite` via `bun run`) |
+| JS runtime | `Bun` | `1.4.2` | Package manager and runtime (Node-compatible, `package.json:scripts` run `vite` via `bun run`) |
 | Frontend | `React` | `^19.3.0` + `react-dom ^19.3.0` | UI |
 | Frontend | `Vite` | `^8.3.0` + `@vitejs/plugin-react ^6.1.1` | Build, `devUrl http://localhost:1420` |
 | Frontend | `TypeScript` | `~7.0.2` | Types |
@@ -26,7 +26,7 @@ A Tauri application for cross-platform inference with native Rust `ort` (ONNX Ru
 
 **JS execution**: `package.json:scripts` call `vite` directly and are run via `bun run dev` / `bun run build`. Do not use `bunx --bun vite`.
 
-Dependency manifests and lockfiles are the version sources; Bun 1.3.14 is the version used in CI.
+Dependency manifests and lockfiles are the version sources; Bun 1.4.2 is the version used in CI.
 
 ## Architecture
 
@@ -125,7 +125,7 @@ For WSLg (Windows 11) GUI: run `wsl --update && wsl --shutdown`, then verify `ec
 
 ```bash
 rustc --version  # use current stable, as CI does
-bun --version    # CI uses 1.3.14
+bun --version    # CI uses 1.4.2
 ```
 
 The app manifest declares Rust 1.77, but CI does not test that minimum against the current lockfile. Install `clippy` and `rustfmt` for the contributor quality gates.
