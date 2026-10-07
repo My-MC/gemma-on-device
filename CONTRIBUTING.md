@@ -9,7 +9,7 @@ This guide defines the contributor workflow for `gemma-on-device` (`com.gemmaond
 - Linux prerequisites for Tauri 2: `libwebkit2gtk-4.1-dev build-essential libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf pkg-config` (see `README.md`)
 - Optional for mobile: Android Studio + NDK + `cargo-ndk` (`aarch64-linux-android` etc.), Xcode for iOS
 
-Dependency versions come from `package.json`, `src-tauri/Cargo.toml`, and their lockfiles. The frontend currently declares React `^19.3.0`, Vite `^8.3.0`, plugin-react `^6.1.1`, and TypeScript `~7.0.2`.
+Dependency versions come from `package.json`, `src-tauri/Cargo.toml`, and their lockfiles. The frontend currently declares React `^19.3.0`, Vite `^8.3.0`, plugin-react `^6.1.1`, TypeScript `~7.0.2`, shadcn/ui with Radix primitives, and Tailwind CSS `^4.3.3`.
 
 ## Getting Started
 
@@ -220,7 +220,7 @@ cargo test --manifest-path src-tauri/Cargo.toml downloaded_hf_native_smoke -- --
 - Desktop editions use `bun run tauri:cuda`, `bun run tauri:migraphx`, and `bun run tauri:coreml`. Each downloads SHA256-pinned upstream packages and stages the required user-space libraries locally; Linux MIGraphX uses a standalone plugin built against ORT 1.30.0 in the same process; packaging requires ROCm 7.2.1 development packages, CMake 4.2+, Ninja, patch, and patchelf and includes HIPRTC and GPU kernel data. CI stages the same packages and uploads each built app as a separate 7-day artifact. See README for details.
 
 - Android: `cargo ndk` targets `aarch64-linux-android` etc., with explicit `xnnpack`/`nnapi` features when needed. iOS: `aarch64-apple-ios`, with explicit `coreml` when needed. CoreML is not enabled automatically. See `README.md` for SDK setup.
-- Generated projects under `src-tauri/gen/` are ignored. iOS config sets minimum version 15.1; set `bundle.iOS.developmentTeam` to your own signing team before building.
+- Generated projects under `src-tauri/gen/` are ignored. iOS config sets minimum version 16.4; set `bundle.iOS.developmentTeam` to your own signing team before building.
 - CI builds Android ARM64 APK/AAB on `master` pushes, pull requests, and manual runs. Packages are signed when `ANDROID_KEY_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and `ANDROID_STORE_PASSWORD` repository secrets are available; otherwise they are unsigned. Fork PRs do not receive those secrets. Unsigned APKs must be signed before installation.
 - CI builds an unsigned iOS ARM64 Release IPA using `--features coreml --no-sign`. AltStore Classic signs it during sideloading, so no iOS signing secrets are required. Mobile artifacts are retained for seven days; device inference validation remains manual.
 - Pinned 1B INT4 graph/data/tokenizer use about 0.88 GB disk. Allow additional download space and roughly 2–3 GB RAM for inference (4 GB+ device recommended).

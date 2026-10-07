@@ -18,6 +18,8 @@ A Tauri application for cross-platform inference with native Rust `ort` (ONNX Ru
 | Frontend | `React` | `^19.3.0` + `react-dom ^19.3.0` | UI |
 | Frontend | `Vite` | `^8.3.0` + `@vitejs/plugin-react ^6.1.1` | Build, `devUrl http://localhost:1420` |
 | Frontend | `TypeScript` | `~7.0.2` | Types |
+| UI | `shadcn/ui` | `^4.21.3` + `radix-ui ^1.7.0` | Accessible, customizable components |
+| UI styling | `Tailwind CSS` | `^4.3.3` + `@tailwindcss/vite ^4.3.3` | Design tokens and utility styling |
 | Tauri JS | `@tauri-apps/api` `cli` | `2.12` | `invoke` / `listen` / `emit` |
 | Tauri JS plugin | `@tauri-apps/plugin-opener` | `2.7` | Open URLs and files |
 | Models | LFM2.5 350M Q4 (default), public Hugging Face ONNX graphs, legacy Gemma 3 | Hugging Face | Native Rust `ort` inference; adapters for graph input contracts |
@@ -57,6 +59,10 @@ All inference uses native Rust `ort`. `src/inference.ts` invokes Tauri commands 
 - Desktop debug builds: existing project `models/` resolved by `resolve_model_dir()` is preferred.
 - Desktop release / Mobile: `app.path().app_data_dir().join("models")` via `src-tauri/src/lib.rs:resolve_model_dir_for_app()`. If app-data resolution fails, it falls back to `resolve_model_dir()`. Model binaries are ignored; see `models/README.md`.
 
+## UI Design
+
+The UI follows Material 3-inspired color roles, typography, spacing, layout, and responsive behavior. See [UI design guidelines](docs/ui-design-guidelines.md) for the component rules, Tailwind conventions, and visual verification checklist.
+
 ## Project Structure
 
 ```
@@ -67,10 +73,13 @@ All inference uses native Rust `ort`. `src/inference.ts` invokes Tauri commands 
 ├── index.html
 ├── src/
 │   ├── App.tsx               # In-app download, model matrix, inference, bench, system
-│   ├── App.css               # download-panel / progress-bar
+│   ├── AppSelect.tsx         # shared Japanese-font DOM listbox
+│   ├── index.css             # Tailwind and theme tokens
 │   ├── inference.ts          # Native Hugging Face Tauri command client
 │   ├── main.tsx
 │   └── assets/
+├── docs/
+│   └── ui-design-guidelines.md # Material 3-inspired UI and Tailwind conventions
 ├── src-tauri/
 │   ├── Cargo.toml            # gemma-on-device, ort, tokenizers, reqwest, tokio
 │   ├── tauri.conf.json       # productName, identifier, build.beforeDevCommand: bun run dev
@@ -184,7 +193,7 @@ The [official LFM2.5 350M model card](https://huggingface.co/LiquidAI/LFM2.5-350
 
 The shared text decoder handles `input_ids`, optional masks and positions, `logits`, full-sequence generation, and standard `past_key_values.*` → `present.*` cache tensors. Native cache outputs are retained without Gemma-specific layer counts; float32/float16 caches and logits are supported. Tokenization, EOS tokens, Jinja chat templates, and temperature come from the selected model and generation options. Native execution-provider selection and CPU fallback apply to both model sources.
 
-ONNX graph execution is the common backend. Split embedding/vision graphs, encoder/decoder pipelines, and other input conventions require native adapters and report the required input. The previous browser-only Gemma 4 image flow has been removed. The initial model cards show LFM2.5 350M, Qwen3 0.6B, Bonsai 1.7B, and SmolLM3 3B before the larger LFM2.5 variant, so different series appear first. Select a card to use that model for preparation, generation, and benchmarking. Legacy Gemma 3/3n controls are collapsed below the inference area. LFM convolution state tensors and `num_logits_to_keep` are handled alongside standard KV caches. Other repositories can be discovered by ID. SmolLM3 Q4 weights use about 2.7 GB; its graph schema has been checked against the decoder, but real inference and target-device memory requirements have not been validated.
+ONNX graph execution is the common backend. Split embedding/vision graphs, encoder/decoder pipelines, and other input conventions require native adapters and report the required input. The previous browser-only Gemma 4 image flow has been removed. The initial model cards show LFM2.5 350M, Qwen3 0.6B, Bonsai 1.7B, and SmolLM3 3B before the larger LFM2.5 variant, so different series appear first. Select a card to use that model for preparation, generation, and benchmarking. Legacy Gemma 3/3n controls are collapsed on the model management page. LFM convolution state tensors and `num_logits_to_keep` are handled alongside standard KV caches. Other repositories can be discovered by ID. SmolLM3 Q4 weights use about 2.7 GB; its graph schema has been checked against the decoder, but real inference and target-device memory requirements have not been validated.
 
 The opt-in smoke check downloads small pinned GPT-2, Phi, and Gemma exports and verifies real native inference, streaming, session reuse, and integrity rejection:
 
@@ -330,7 +339,7 @@ Non-mobile debug builds prefer existing project `models/` for compatibility with
 bun run tauri android init
 bun run tauri android dev
 
-# iOS 15.1+ (requires Xcode, macOS only)
+# iOS 16.4+ (requires Xcode, macOS only)
 rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
 brew install xcodegen libimobiledevice cocoapods
 bun run tauri ios init
@@ -348,7 +357,7 @@ iOS creates an unsigned ARM64 release IPA without signing secrets. Download the 
 
 The generated Xcode project lives in `src-tauri/gen/apple`. Set
 `bundle.iOS.developmentTeam` in `src-tauri/tauri.conf.json` to the team reported
-by `bun run tauri info` for signed builds. `src-tauri/tauri.conf.json` sets minimum iOS version 15.1. The generated project is ignored; after initialization, verify that its deployment settings still specify 15.1 before building.
+by `bun run tauri info` for signed builds. `src-tauri/tauri.conf.json` sets minimum iOS version 16.4 to match the frontend browser requirements. The generated project is ignored; after initialization, verify that its deployment settings still specify 16.4 before building.
 
 For a physical device, connect and unlock the iPhone, trust the Mac, enable
 Developer Mode, and confirm that it appears under `xcrun xctrace list devices`.

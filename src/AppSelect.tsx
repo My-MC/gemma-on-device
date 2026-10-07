@@ -3,15 +3,17 @@ import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 export function AppSelect({
   value,
   onChange,
-  disabled,
+  disabled = false,
   labelId,
   options,
+  className = "",
 }: {
   value: string;
   onChange: (value: string) => void;
-  disabled: boolean;
+  disabled?: boolean;
   labelId: string;
   options: ReadonlyArray<{ value: string; label: string }>;
+  className?: string;
 }) {
   const id = useId();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -110,11 +112,11 @@ export function AppSelect({
   };
 
   return (
-    <div className="app-select" ref={rootRef}>
+    <div className={`relative w-full min-w-0 ${className}`} ref={rootRef}>
       <button
         ref={triggerRef}
         type="button"
-        className="app-select-trigger"
+        className="group flex min-h-14 w-full min-w-0 items-center justify-between gap-4 rounded-xl border border-outline bg-surface-container-low px-4 text-left font-sans text-[0.9375rem] font-normal text-foreground focus-visible:outline-3 focus-visible:outline-primary/40 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={`${id}-listbox`}
@@ -128,16 +130,22 @@ export function AppSelect({
           }
         }}
       >
-        <span id={`${id}-selected`}>
+        <span
+          id={`${id}-selected`}
+          className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
+        >
           {selectedOption?.label ?? "候補がありません"}
         </span>
-        <span className="app-select-caret" aria-hidden="true" />
+        <span
+          className="h-[9px] w-[9px] shrink-0 translate-y-[-2px] rotate-45 border-r-[1.5px] border-b-[1.5px] border-current transition-transform group-aria-expanded:translate-y-[2px] group-aria-expanded:rotate-[225deg]"
+          aria-hidden="true"
+        />
       </button>
       {open && (
         <div
           ref={listboxRef}
           id={`${id}-listbox`}
-          className="app-select-listbox"
+          className="absolute top-[calc(100%+8px)] left-0 z-20 max-h-[280px] w-full overflow-auto rounded-2xl border border-outline-variant bg-popover p-2 font-sans text-popover-foreground shadow-[0_8px_24px_rgb(16_24_40_/_16%)] outline-none focus-visible:outline-3 focus-visible:outline-primary/40 focus-visible:outline-offset-2 max-[480px]:w-full max-[480px]:max-w-[calc(100vw-40px)]"
           role="listbox"
           tabIndex={0}
           aria-labelledby={labelId}
@@ -148,7 +156,7 @@ export function AppSelect({
             <div
               id={`${id}-option-${index}`}
               key={option.value}
-              className="app-select-option"
+              className={`min-h-12 cursor-pointer rounded-[10px] px-4 py-3 text-sm leading-6 whitespace-normal [overflow-wrap:anywhere] ${index === selectedIndex ? "font-semibold text-primary" : "font-normal text-popover-foreground"} ${index === activeIndex ? "bg-secondary text-secondary-foreground" : "hover:bg-secondary hover:text-secondary-foreground"}`}
               role="option"
               tabIndex={-1}
               aria-selected={index === selectedIndex}
