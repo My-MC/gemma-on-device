@@ -265,8 +265,6 @@ The desktop wrapper and GPU edition scripts use zstd level 3 for Debian/RPM, zst
 
 GPU CI checks free space before removing unused runner SDKs: 16 GiB for CUDA and 32 GiB for MIGraphX. It stops deleting once the threshold is met and reports insufficient space explicitly. Run `python3 -m unittest discover -s scripts -p 'test_*.py'` to validate cache identity, disk cleanup, and native Debian archive layout.
 
-The Windows compression benchmark workflow compares MSI MSZIP and NSIS zlib with uncompressed installers using the same CUDA application binary per format. It explicitly overrides the production compression settings for each comparison. `bun scripts/build_tauri_edition.ts cuda --no-bundle` prepares and builds the app without installers; `scripts/benchmark_windows_compression.py` times subsequent bundle generation and records file sizes. Compare its JSON measurements with the separate upload step durations, both using artifact `compression-level: 0`. Experimental installers expire after one day; measurements expire after seven days.
-
 CoreML targets macOS 14 or newer on Apple Silicon. CoreML uses CPU and GPU where supported; unsupported graph nodes can fall back to CPU. Set `GEMMA_COREML_PROFILE=1` when launching the app to log per-operator hardware assignment. The WebGPU provider remains bundled in each GPU edition for fallback.
 
 Thresholds: desktop 5 tok/s / mobile 2 tok/s (INT4).
