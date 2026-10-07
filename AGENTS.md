@@ -10,7 +10,7 @@ This file defines repository-specific operational rules for agents/contributors 
 - **Default model**: LFM2.5 350M Q4. `src/default-model.json` is the shared UI/backend/CLI definition with pinned revision and SHA256. Gemma 3 is an explicit legacy option.
 - **Initial catalog**: show LFM2.5, Qwen3, Bonsai, and SmolLM3 before repeat variants of a series. Keep legacy Gemma controls collapsed; catalog cards and the selector share `LOCAL_MODELS` in `src/inference.ts`.
 - **Selection menus**: use `src/AppSelect.tsx` with the bundled Japanese font for triggers and options. Avoid native `<select>` popups, whose font rendering can depend on the host/WSL environment; preserve keyboard navigation and focus handling.
-- **Token budgets**: context defaults to 4096 (UI choices 2048/4096), generation to 2048 with a 4096 ceiling. `inference/limits.rs` enforces the total prompt + output budget and model context capacity; do not restore a hidden 512-token clamp.
+- **Token budgets**: context defaults to 4096 and accepts any positive integer without an application ceiling; generation defaults to 2048 with a 4096 ceiling. `inference/limits.rs` enforces the total prompt + output budget and model context capacity; do not restore a hidden 512-token clamp.
 
 ## Tech Stack
 

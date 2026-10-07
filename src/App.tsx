@@ -978,16 +978,22 @@ export default function App() {
               <span id="context-length-label">
                 コンテキスト長（入力＋出力）
               </span>
-              <AppSelect
-                value={String(contextLength)}
-                onChange={(value) => setContextLength(Number(value))}
+              <Input
+                type="number"
+                min={1}
+                step={1}
+                value={contextLength}
+                onChange={(event) =>
+                  setContextLength(Number(event.target.value))
+                }
                 disabled={downloading || isGenerating || benchRunning}
-                labelId="context-length-label"
-                options={[
-                  { value: "2048", label: "2048トークン" },
-                  { value: "4096", label: "4096トークン（既定）" },
-                ]}
+                aria-labelledby="context-length-label"
+                className="h-14 min-h-14 w-full rounded-xl border border-outline bg-surface-container-low px-4 text-base text-foreground shadow-none focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-primary/30 focus-visible:outline-offset-1"
               />
+              <span className="text-xs font-normal">
+                任意のトークン数を指定できます（既定:
+                4096）。実際の上限はモデルの対応範囲に制限されます。
+              </span>
             </div>
 
             <label

@@ -16,10 +16,7 @@ pub fn generation_budget(
         (1..=MAX_TOKENS).contains(&requested),
         "生成トークン数は1〜4096で指定してください"
     );
-    anyhow::ensure!(
-        (1..=DEFAULT_CONTEXT_LENGTH).contains(&context),
-        "コンテキスト長は1〜4096で指定してください"
-    );
+    anyhow::ensure!(context > 0, "コンテキスト長は1以上で指定してください");
     let limit = model_limit.map_or(context, |model| context.min(model));
     anyhow::ensure!(prompt_tokens < limit,
         "入力は{prompt_tokens}トークンあり、コンテキスト上限{limit}を使い切っています。入力を短くするかコンテキスト長を増やしてください");
@@ -57,5 +54,22 @@ mod tests {
         assert!(generation_budget(1, Some(0), None, None).is_err());
         assert!(generation_budget(1, Some(4097), None, None).is_err());
         assert!(generation_budget(1, None, Some(0), None).is_err());
+    }
+
+    #[test]
+    fn context_can_exceed_4096_and_respects_model_capacity() {
+        assert_eq!(
+            generation_budget(12000, Some(2048), Some(32768), Some(32768)).unwrap(),
+            2048
+        );
+        assert_eq!(
+            generation_budget(32000, Some(2048), Some(131072), Some(32768)).unwrap(),
+            768
+        );
+        assert!(generation_budget(32768, None, Some(131072), Some(32768)).is_err());
+        assert_eq!(
+            generation_budget(100000, None, Some(131072), None).unwrap(),
+            2048
+        );
     }
 }
