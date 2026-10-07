@@ -24,6 +24,10 @@ bun run tauri dev          # Desktop (see README for WSL flags)
 
 `package.json:scripts` call `vite` directly. Use `bun run dev` / `bun run build`. Do not use `bunx --bun vite`.
 
+## Tauri Dependency Updates
+
+Update Tauri JavaScript packages (`@tauri-apps/api`, `@tauri-apps/cli`) and Rust crates (`tauri`, `tauri-build`) together in one PR, including both lockfiles. Keep `@tauri-apps/api` and `tauri` on the same minor version, and keep each JavaScript plugin and its Rust crate on the exact same resolved version. Consolidate separate dependency bot PRs before merging Tauri updates. See the [Tauri dependency update guide](https://v2.tauri.app/develop/updating-dependencies/).
+
 ## Dependency Licenses
 
 The application footer opens an offline list of production JavaScript and Rust dependencies and their license texts. The list is generated for the active target and Cargo features before `bun run dev` and `bun run build`; `bun run licenses:generate` refreshes it directly. Windows builds include license files extracted from the staged ONNX Runtime DLL. CUDA, MIGraphX, and CoreML editions include the license and notice files staged with their runtime artifacts. Rust dependencies enabled by each edition's Cargo features are included as well.
