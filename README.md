@@ -11,7 +11,7 @@ A Tauri application for cross-platform inference with native Rust `ort` (ONNX Ru
 | --- | --- | --- | --- |
 | Rust | `ort` | `2.0.0-rc.13` (`half` feature) | ONNX Runtime wrapper, CPU by default, EPs switched via Cargo features |
 | Rust | `tokenizers` | `0.23` | Gemma SentencePiece JSON (`tokenizer.json`) |
-| Rust | `tauri` | `2.12` + `tauri-build 2.7` | Desktop / mobile Rust backend |
+| Rust | `tauri` | `2.12.1` + `tauri-build 2.7.1` | Desktop / mobile Rust backend |
 | Rust | `tokio` `futures` `reqwest` `tokio-util` | - | Async runtime + in-app download (`rustls-tls`) |
 | Rust | `serde` `anyhow` `ndarray` | - | IPC, errors, tensor creation (`[1, seq_len]` shape) |
 | JS runtime | `Bun` | `1.4.2` | Package manager and runtime (Node-compatible, `package.json:scripts` run `vite` via `bun run`) |
@@ -20,7 +20,7 @@ A Tauri application for cross-platform inference with native Rust `ort` (ONNX Ru
 | Frontend | `TypeScript` | `~7.0.2` | Types |
 | UI | `shadcn/ui` | `^4.21.3` + `radix-ui ^1.7.0` | Accessible, customizable components |
 | UI styling | `Tailwind CSS` | `^4.3.3` + `@tailwindcss/vite ^4.3.3` | Design tokens and utility styling |
-| Tauri JS | `@tauri-apps/api` `cli` | `2.12` | `invoke` / `listen` / `emit` |
+| Tauri JS | `@tauri-apps/api` `cli` | `2.12.1` | `invoke` / `listen` / `emit` |
 | Tauri JS plugin | `@tauri-apps/plugin-opener` | `2.7` | Open URLs and files |
 | Models | LFM2.5 350M Q4 (default), public Hugging Face ONNX graphs, legacy Gemma 3 | Hugging Face | Native Rust `ort` inference; adapters for graph input contracts |
 
