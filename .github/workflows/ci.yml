@@ -150,6 +150,20 @@ jobs:
         with:
           path: .cache/runtime-wheels/migraphx-plugin-cache
           key: migraphx-plugin-v2-${{ matrix.os }}-${{ runner.arch }}-${{ steps.migraphx-build.outputs.identity }}-${{ steps.migraphx-build.outputs.inputs }}
+      - name: Install Rust compiler cache
+        if: runner.os == 'Linux'
+        uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: "v0.18.0"
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          SCCACHE_GHA_VERSION: gemma-desktop-rust-v1
+      - name: Enable Rust compiler cache
+        if: runner.os == 'Linux'
+        run: |
+          echo 'RUSTC_WRAPPER=sccache' >> "$GITHUB_ENV"
+          echo 'SCCACHE_GHA_ENABLED=true' >> "$GITHUB_ENV"
+          echo 'SCCACHE_GHA_VERSION=gemma-desktop-rust-v1' >> "$GITHUB_ENV"
       - name: Build edition bundle
         run: bun run tauri:${{ matrix.edition }}
         env:
@@ -247,6 +261,20 @@ jobs:
         run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
       - name: cargo fmt
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+      - name: Install Rust compiler cache
+        if: runner.os == 'Linux'
+        uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: "v0.18.0"
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          SCCACHE_GHA_VERSION: gemma-desktop-rust-v1
+      - name: Enable Rust compiler cache for Release build
+        if: runner.os == 'Linux'
+        run: |
+          echo 'RUSTC_WRAPPER=sccache' >> "$GITHUB_ENV"
+          echo 'SCCACHE_GHA_ENABLED=true' >> "$GITHUB_ENV"
+          echo 'SCCACHE_GHA_VERSION=gemma-desktop-rust-v1' >> "$GITHUB_ENV"
       - name: Build Tauri bundle — Linux/macOS
         if: runner.os != 'Windows'
         run: bun run tauri:desktop

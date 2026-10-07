@@ -3,7 +3,6 @@
 /.cache
 __pycache__/
 /runtime-artifacts
-/benchmark-results
 node_modules
 dist
 dist-ssr
