@@ -176,6 +176,7 @@ await Bun.write(
 const cargoFeature = `desktop-${edition}`;
 const config = "src-tauri/tauri.gpu.conf.json";
 const bundleArgs = process.platform === "linux" ? ["--bundles", "deb"] : [];
+if (process.argv.includes("--no-bundle")) bundleArgs.push("--no-bundle");
 if (process.platform === "win32" && edition === "cuda") {
   bundleArgs.push(
     "--config",

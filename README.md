@@ -261,6 +261,8 @@ Building this edition requires ROCm 7.2.1 with `migraphx`, `migraphx-dev`, `hip-
 
 The MIGraphX plugin's uncached C++ build uses the detected CPU count, capped at four parallel jobs to limit memory use. Set `CMAKE_BUILD_PARALLEL_LEVEL` to override this limit; the selected job count is printed in the build log. A verified compiled-plugin cache skips this build entirely.
 
+The Windows compression benchmark workflow compares the existing CUDA MSI/NSIS compression with uncompressed installers using the same application binary per format. `bun scripts/build_tauri_edition.ts cuda --no-bundle` prepares and builds the app without installers; `scripts/benchmark_windows_compression.py` times subsequent bundle generation and records file sizes. Compare its JSON measurements with the separate upload step durations, both using artifact `compression-level: 0`. Experimental installers expire after one day; measurements expire after seven days. The normal edition builds retain their existing compression settings.
+
 CoreML targets macOS 14 or newer on Apple Silicon. CoreML uses CPU and GPU where supported; unsupported graph nodes can fall back to CPU. Set `GEMMA_COREML_PROFILE=1` when launching the app to log per-operator hardware assignment. The WebGPU provider remains bundled in each GPU edition for fallback.
 
 Thresholds: desktop 5 tok/s / mobile 2 tok/s (INT4).
