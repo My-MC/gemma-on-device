@@ -1,52 +1,52 @@
-# UIデザイン方針
+# UI Design Guidelines
 
-この文書は Gemma On Device の画面を新規作成・変更するときに参照するデザイン基準です。Material 3 の色の役割、階層、余白、形状を参考にします。公式 Material 3 コンポーネントとの完全一致を目的とせず、アプリ全体で一貫し、デスクトップ・モバイル・WSL環境で使いやすいことを優先します。
+Use this document when creating or changing screens in Gemma On Device. The design takes inspiration from Material 3's color roles, hierarchy, spacing, and shapes. It does not aim to reproduce official Material 3 components exactly; it prioritizes a consistent app experience that works well on desktop, mobile, and WSL environments.
 
-## 基本方針
+## Core principles
 
-- 色は個別画面で直接決めず、`src/index.css` のセマンティックなCSS変数と Tailwind のテーマユーティリティを使います。背景、カード、コンテナ、文字、境界線、主要操作、状態色の役割を分け、ライト・ダーク両テーマで同じ役割を保ちます。
-- 日本語フォントは同梱した Noto Sans JP を使います。OSやブラウザーのフォント設定に見た目を委ねません。
-- 余白は 4px の倍数を基本とし、8 / 12 / 16 / 24 / 32px をよく使う段階として、関連要素のまとまりと画面階層を示します。
-- 形状は役割に合わせます。入力欄は約12px、カードや一覧項目は16〜28px、チップや主要ボタンは丸形を基本にします。
-- 操作可能な領域は見つけやすい寸法とし、フォーカス表示、無効状態、選択状態を色だけに頼らず明示します。
+- Use semantic CSS variables from `src/index.css` and Tailwind theme utilities instead of choosing colors per screen. Give backgrounds, cards, containers, text, borders, primary actions, and status colors distinct roles, and preserve those roles in both light and dark themes.
+- Use the bundled Noto Sans JP font for Japanese text. Do not rely on operating-system or browser font settings for the visual result.
+- Base spacing on multiples of 4px. Common steps are 8 / 12 / 16 / 24 / 32px; use them to express grouping and screen hierarchy.
+- Choose shapes by role: about 12px for inputs, 16–28px for cards and list items, and pill shapes for chips and primary buttons.
+- Make interactive areas easy to find and clearly indicate focus, disabled, and selected states without relying on color alone.
 
-## レイアウトとレスポンシブ動作
+## Layout and responsive behavior
 
-- デスクトップでは内容幅を最大約1120pxに抑え、主要ナビゲーションを左側の縦レールに置きます（幅が1000pxを超える場合）。
-- 幅1000px以下ではナビゲーションを上部の横並びにし、コンテンツを画面幅に合わせます。
-- 幅760px以下ではナビゲーションを下部に固定し、セーフエリアを考慮します。画面高が720px以下の小型表示では固定ナビを通常フローに戻し、内容領域を圧迫しないようにします。
-- 幅480px以下では見出し、操作ボタン、複数列の入力を縦方向に組み替えます。幅320pxでも横スクロールを発生させないことを確認します。
-- 情報カード、フォーム、ベンチマーク結果は狭い幅で列数を減らします。要素を縮めて読みにくくするより、自然に折り返すか縦に積みます。
+- On desktop, keep content to about 1120px wide and place primary navigation in a vertical rail on the left when the viewport is wider than 1000px.
+- At 1000px and below, move navigation to a horizontal row at the top and let content use the available width.
+- At 760px and below, fix navigation to the bottom and account for the safe area. On short viewports at 720px high or below, return fixed navigation to the normal flow so it does not crowd the content.
+- At 480px and below, stack headings, action buttons, and multi-column inputs vertically. Verify that a 320px viewport does not cause horizontal scrolling.
+- Reduce the number of columns in information cards, forms, and benchmark results on narrow screens. Let elements wrap or stack naturally instead of shrinking them until they are hard to read.
 
-## 入力と選択コントロール
+## Inputs and selection controls
 
-- `<select>` のOS・ブラウザー依存ポップアップは使いません。環境によっては同梱フォントが適用されず、日本語が豆腐になるためです。
-- 選択 UI は `src/App.tsx` の `AppSelect` を使います。DOM内で描画する listbox とし、`role="listbox"` / `role="option"`、選択状態、アクティブ項目を公開します。上下矢印、Home / End、Enter / Space、Escape、Tab、外側クリックを扱います。
-- 入力欄とプルダウントリガーは高さ56pxを基本にし、ラベル、境界線、背景、フォーカスリングをテーマトークンに合わせます。操作ボタンは最低48pxを確保します。
-- 新しい選択項目を追加するときも、ネイティブのメニュー表示へ戻さず、キーボード操作とフォーカス復帰を確認します。
+- Do not use OS- or browser-rendered `<select>` popups. Some environments do not apply the bundled font to these controls, which can render Japanese text as tofu.
+- Use `AppSelect` in `src/App.tsx` for selection UI. Render the listbox in the DOM and expose `role="listbox"`, `role="option"`, selection state, and the active item. Support Arrow Up/Down, Home/End, Enter/Space, Escape, Tab, and outside clicks.
+- Use 56px as the standard height for inputs and dropdown triggers. Match labels, borders, backgrounds, and focus rings to the theme tokens. Keep action buttons at least 48px high.
+- Keep new selection controls browser-rendered, and verify keyboard interaction and focus restoration.
 
-## 状態表示とチップ
+## Status and chips
 
-- 成功・警告・エラーは、前景色とコンテナ色の組み合わせで示します。単なる赤・緑の色置換で済ませず、文言や状態も併記します。
-- ヘッダーに並ぶランタイム、実行環境、モデル状態のチップは同じ寸法を使います。現在の基準はデスクトップ高さ40px、幅760px以下で36pxです。文字は一つのチップ内で改行させず、チップ間で折り返します。
+- Show success, warning, and error states with foreground and container color pairs. Include text or another status cue rather than relying on a red/green color change alone.
+- Use consistent dimensions for runtime, execution environment, and model status chips in the header. The current standard is 40px high on desktop and 36px at widths of 760px or less. Keep each chip's text on one line and allow wrapping between chips.
 
-## ダイアログと長い一覧
+## Dialogs and long lists
 
-- ダイアログの背面は不透明なカード面を使い、背後の画面が透けないようにします。遮蔽用バックドロップとダイアログ面を別レイヤーにします。
-- ライセンスダイアログは項目数にかかわらず一定の表示領域を保ちます。デスクトップでは最大900px幅・最大780px高（ビューポートの90%まで）、幅600px以下ではビューポートの96%高を基準にします。
-- 検索欄とカテゴリ選択の位置は一覧件数で動かさず、一覧部分だけをスクロールさせます。0件、読み込み中、エラー、1件、多数の各状態でダイアログ外枠の寸法が変わらないことを確認します。
-- Escapeで閉じる、フォーカスをダイアログ内に保つ、閉じた後に起点へ戻す動作を維持します。
+- Give dialogs an opaque card surface so the screen behind them does not show through. Keep the scrim and dialog surface on separate layers.
+- Keep the license dialog's visible area stable regardless of item count. The desktop target is up to 900px wide and 780px high (capped at 90% of the viewport); at widths of 600px or less, target 96% of the viewport height.
+- Keep search and category controls in fixed positions while only the list scrolls. Verify that the dialog's outer dimensions stay stable for zero results, loading, error, one item, and many items.
+- Preserve Escape-to-close behavior, keep focus inside the dialog, and return focus to the dialog trigger when it closes.
 
-## 実装ルール
+## Implementation rules
 
-- コンポーネントの見た目は JSX の Tailwind ユーティリティで記述します。ページ固有のCSSクラスを新設したり、`App.css` / `LicenseDialog.css` を再導入したりしません。
-- 色やフォントなど複数画面で共有する基礎値は `src/index.css` のテーマトークンに追加し、クラスには `bg-card`、`text-on-surface-variant` のような役割名を使います。
-- 例外的な寸法やブレークポイントは Tailwind の任意値・任意バリアントで表します。短い画面高のナビゲーションには既存の `short-mobile:` バリアントを使います。
-- 状態に応じて変わるクラスは完全なクラス文字列を条件分岐で列挙します。実行時にクラス名を部分連結して Tailwind の検出対象から外さないようにします。
-- 新しい依存やコンポーネントライブラリを足す前に、既存の shadcn/Radix ベース部品と Tailwind の構成で実現できるか確認します。
+- Style components with Tailwind utilities in JSX. Do not add page-specific CSS classes or reintroduce `App.css` or `LicenseDialog.css`.
+- Add shared foundations such as colors and fonts to the theme tokens in `src/index.css`. Use role-based utility names such as `bg-card` and `text-on-surface-variant` in component classes.
+- Express exceptional dimensions and breakpoints with Tailwind arbitrary values and variants. Use the existing `short-mobile:` variant for navigation on short viewports.
+- List complete class names in conditional branches for state-dependent styling. Do not assemble class names from fragments at runtime, where Tailwind may not detect them.
+- Before adding a dependency or component library, check whether the existing shadcn/Radix-based components and Tailwind setup can meet the need.
 
-## 変更時の確認
+## Checks when making changes
 
-フロントエンド変更では `bun run check` と `bun run build` を実行します。レイアウトを変えた場合は、少なくとも幅320 / 390 / 600 / 900 / 1280pxを確認し、横はみ出し、文字の切れ、フォーカス視認性、ナビゲーションの位置を見ます。幅760px以下では画面高720px以下の状態も確認します。
+For frontend changes, run `bun run check` and `bun run build`. For layout changes, check at least 320 / 390 / 600 / 900 / 1280px widths for horizontal overflow, clipped text, visible focus, and navigation placement. At widths of 760px or less, also check a viewport height of 720px or less.
 
-選択 UI を変えた場合は、マウスとキーボードの両方で開閉・選択・キャンセルを試します。ダイアログを変えた場合は、幅390pxと1280pxで内容を絞り込み、結果が0件になっても外枠の寸法が保たれることを確認します。
+For selection UI changes, test opening, closing, selecting, and canceling with both mouse and keyboard. For dialog changes, filter content at 390px and 1280px widths and confirm that the outer dimensions remain stable when there are no results.
