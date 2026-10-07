@@ -2,6 +2,7 @@ name: sccache benchmark
 
 on:
   workflow_dispatch:
+  workflow_call:
   pull_request:
     branches: [master]
     paths:
@@ -74,4 +75,3 @@ jobs:
           path: benchmark-results/sccache/
           if-no-files-found: error
           retention-days: 7
-
