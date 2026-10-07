@@ -48,13 +48,13 @@ jobs:
         if: runner.os == 'Windows'
         with:
           bun-version: "1.3.14"
-      - name: Stage onnxruntime.dll (Windows)
-        if: runner.os == 'Windows'
-        run: bun scripts/download_ort_dll.ts --force
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target
           key: ${{ matrix.feature }}
+      - name: Stage onnxruntime.dll (Windows)
+        if: runner.os == 'Windows'
+        run: bun scripts/download_ort_dll.ts --force
       - name: Check edition feature
         run: cargo check --manifest-path src-tauri/Cargo.toml --features ${{ matrix.feature }}
       - name: Clippy edition feature
@@ -234,16 +234,13 @@ jobs:
           bun-version: "1.3.14"
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
-      # Only Windows bundles `onnxruntime.dll` (`src-tauri/tauri.windows.conf.json`
-      # `bundle.resources`) and its build script validates that path during
-      # `cargo check`, so stage it up front. `--force` re-downloads; the script
-      # SHA256-verifies the release zip before saving or extracting.
-      - name: Stage onnxruntime.dll (Windows)
-        if: runner.os == 'Windows'
-        run: bun scripts/download_ort_dll.ts --force
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target
+      # Cache restoration can replace target/release; stage the verified DLL after it.
+      - name: Stage onnxruntime.dll (Windows)
+        if: runner.os == 'Windows'
+        run: bun scripts/download_ort_dll.ts --force
       - name: cargo check
         run: cargo check --manifest-path src-tauri/Cargo.toml
       - name: cargo clippy
